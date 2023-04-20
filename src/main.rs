@@ -8,6 +8,8 @@ use std::io;
 use std::io::prelude::*;
 use std::fs;
 
+const CRLF: &str = "\r\n";
+
 fn main() -> io::Result<()> {
     // 监听端口
     let port: u16 = 7878;
@@ -24,6 +26,7 @@ fn main() -> io::Result<()> {
         }
     };
 
+    // TcpListener::incoming函数返回迭代器，等价于无限循环地调用TcpListener::accept
     for stream in listener.incoming() {
         let stream = stream.unwrap();
         handle_connection(stream);
@@ -39,9 +42,9 @@ fn handle_connection(mut stream: TcpStream) {
     let get = b"GET / HTTP/1.1\r\n";
 
     let (status_line, filename) = if buffer.starts_with(get) {
-        ("HTTP/1.1 200 OK", "hello.html")
+        ("HTTP/1.1 200 OK", "html/index.html")
     } else {
-        ("HTTP/1.1 404 NOT FOUND", "404.html")
+        ("HTTP/1.1 404 NOT FOUND", "html/404.html")
     };
 
     let contents = fs::read_to_string(filename).unwrap();
