@@ -1,29 +1,24 @@
+#![allow(clippy::unused_io_amount)]
+
 mod exception;
 mod param;
 mod config;
+mod request;
+mod response;
+mod route;
 
 use param::*;
+use tokio::io::AsyncWriteExt;
 
-// use std::net::Ipv4Addr;
-// use std::net::SocketAddrV4;
-// use std::net::TcpListener;
-// use std::net::TcpStream;
-use std::io;
 use std::fs;
 
-use async_std::task::spawn;
-use async_std::prelude::*;
-use async_std::net::Ipv4Addr;
-use async_std::net::SocketAddrV4;
-use async_std::net::TcpListener;
-use async_std::net::TcpStream;
-
-use futures::stream::StreamExt;
+use std::net::{Ipv4Addr, SocketAddrV4};
+use tokio::net::{TcpListener, TcpStream};
 
 // const CRLF: &str = "\r\n";
 
-#[async_std::main]
-async fn main() -> io::Result<()> {
+#[tokio::main]
+async fn main() {
     // 监听端口
     let port: u16 = 7878;
     // 地址，本地调试用127.0.0.1
@@ -31,6 +26,7 @@ async fn main() -> io::Result<()> {
     // 拼接socket
     let socket = SocketAddrV4::new(address, port);
 
+    // 执行bind
     let listener = match TcpListener::bind(socket).await {
         Ok(listener) => listener,
         Err(e) => {
@@ -39,20 +35,28 @@ async fn main() -> io::Result<()> {
         }
     };
 
-    // TcpListener::incoming函数返回迭代器，等价于无限循环地调用TcpListener::accept
-    listener
-        .incoming()
-        .for_each_concurrent(/* limit */ None, |tcpstream| async move {
-            let tcpstream = tcpstream.unwrap();
-            spawn(handle_connection(tcpstream));
-        }).await;
+    loop {
+        let (mut stream, _) = listener.accept().await.unwrap();
 
-    Ok(())
+        tokio::spawn(async move{
+            handle_connection(stream).await;
+        });
+    }
 }
 
 async fn handle_connection(mut stream: TcpStream) {
-    let mut buffer = [0; 1024];
-    stream.read(&mut buffer).await.unwrap();
+    let mut buffer = vec![0; 1024];
+    let mut bytes_read: usize = 0;
+
+    match stream.try_read(&mut buffer) {
+        Ok(n) => bytes_read = n,
+        Err(e) => {
+            println!("Error when reading from TCP stream!");
+            panic!("{}", e);
+        }
+    }
+    
+    println!("{}", String::from_utf8_lossy(&buffer));
 
     let get = b"GET / HTTP/1.1\r\n";
 
