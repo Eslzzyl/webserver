@@ -5,21 +5,22 @@ mod param;
 mod config;
 mod request;
 mod response;
-mod route;
 
 use param::*;
 use request::Request;
-use tokio::io::AsyncWriteExt;
+use config::Config;
 
-use std::fs;
+use tokio::io::AsyncWriteExt;
 
 use std::net::{Ipv4Addr, SocketAddrV4};
 use tokio::net::{TcpListener, TcpStream};
 
 #[tokio::main]
 async fn main() {
+    let config = Config::from_toml("files/config.toml");
+
     // 监听端口
-    let port: u16 = 7878;
+    let port: u16 = config.port();
     // 地址，本地调试用127.0.0.1
     let address = Ipv4Addr::new(127, 0, 0, 1);
     // 拼接socket
@@ -38,12 +39,12 @@ async fn main() {
         let (mut stream, _) = listener.accept().await.unwrap();
 
         tokio::spawn(async move{
-            handle_connection(stream).await;
+            handle_connection(stream, &config).await;
         });
     }
 }
 
-async fn handle_connection(mut stream: TcpStream) {
+async fn handle_connection(mut stream: TcpStream, config: &Config) {
     let mut buffer = vec![0; 1024];
     let mut bytes_read: usize = 0;
 
@@ -62,7 +63,6 @@ async fn handle_connection(mut stream: TcpStream) {
 
     let request = Request::try_from(buffer).unwrap();
     dbg!(request);
-    
     
 
     // let get = b"GET / HTTP/1.1\r\n";
@@ -84,4 +84,8 @@ async fn handle_connection(mut stream: TcpStream) {
 
     // stream.write(response.as_bytes()).await.unwrap();
     // stream.flush().await.unwrap();
+}
+
+fn route(path: &str, config: &Config) -> &str {
+    &(config.www_root().to_owned() + path)
 }
