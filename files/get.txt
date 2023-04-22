@@ -1,0 +1,24 @@
+GET / HTTP/1.1
+Host: localhost
+Proxy-Connection: Keep-Alive
+X-Request-ID: cd4ff5fbc1bdb64c7cbfca2c787e123f
+X-Real-IP: 155.94.194.41
+X-Forwarded-For: 155.94.194.41
+X-Forwarded-Host: eslzzyl-opulent-bassoon-q6rqqxv7g47399jv-7878.preview.app.github.dev
+X-Forwarded-Port: 443
+X-Forwarded-Proto: https
+X-Original-URI: /
+X-Scheme: https
+sec-ch-ua: "Microsoft Edge";v="111", "Not(A:Brand";v="8", "Chromium";v="111"
+sec-ch-ua-mobile: ?0
+sec-ch-ua-platform: "Windows"
+upgrade-insecure-requests: 1
+user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36 Edg/111.0.1661.62
+accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+sec-fetch-site: same-site
+sec-fetch-mode: navigate
+sec-fetch-user: ?1
+sec-fetch-dest: document
+referer: https://eslzzyl-opulent-bassoon-q6rqqxv7g47399jv.github.dev/
+accept-encoding: gzip, deflate, br
+accept-language: zh-CN,zh;q=0.9,en;q=0

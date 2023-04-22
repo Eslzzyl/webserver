@@ -8,14 +8,13 @@ mod response;
 mod route;
 
 use param::*;
+use request::Request;
 use tokio::io::AsyncWriteExt;
 
 use std::fs;
 
 use std::net::{Ipv4Addr, SocketAddrV4};
 use tokio::net::{TcpListener, TcpStream};
-
-// const CRLF: &str = "\r\n";
 
 #[tokio::main]
 async fn main() {
@@ -48,6 +47,9 @@ async fn handle_connection(mut stream: TcpStream) {
     let mut buffer = vec![0; 1024];
     let mut bytes_read: usize = 0;
 
+    // 等待tcpstream变得可读
+    stream.readable().await.unwrap();
+
     match stream.try_read(&mut buffer) {
         Ok(n) => bytes_read = n,
         Err(e) => {
@@ -55,26 +57,31 @@ async fn handle_connection(mut stream: TcpStream) {
             panic!("{}", e);
         }
     }
+
+    // println!("{}", String::from_utf8_lossy(&buffer));
+
+    let request = Request::try_from(buffer).unwrap();
+    dbg!(request);
     
-    println!("{}", String::from_utf8_lossy(&buffer));
+    
 
-    let get = b"GET / HTTP/1.1\r\n";
+    // let get = b"GET / HTTP/1.1\r\n";
 
-    let (status_line, filename) = if buffer.starts_with(get) {
-        ("HTTP/1.1 200 OK", HTML_INDEX)
-    } else {
-        ("HTTP/1.1 404 NOT FOUND", HTML_404)
-    };
+    // let (status_line, filename) = if buffer.starts_with(get) {
+    //     ("HTTP/1.1 200 OK", HTML_INDEX)
+    // } else {
+    //     ("HTTP/1.1 404 NOT FOUND", HTML_404)
+    // };
 
-    let contents = fs::read_to_string(filename).unwrap();
+    // let contents = fs::read_to_string(filename).unwrap();
 
-    let response = format!(
-        "{}\r\nContent-Length: {}\r\n\r\n{}",
-        status_line,
-        contents.len(),
-        contents
-    );
+    // let response = format!(
+    //     "{}\r\nContent-Length: {}\r\n\r\n{}",
+    //     status_line,
+    //     contents.len(),
+    //     contents
+    // );
 
-    stream.write(response.as_bytes()).await.unwrap();
-    stream.flush().await.unwrap();
+    // stream.write(response.as_bytes()).await.unwrap();
+    // stream.flush().await.unwrap();
 }

@@ -2,7 +2,9 @@ use std::fmt;
 
 #[derive(Debug, Copy, Clone)]
 pub enum Exception {
-    RequestConstructFailed,
+    RequestIsNotUtf8,
+    UnSupportedRequestMethod,
+    UnsupportedHttpVersion,
 }
 
 use Exception::*;
@@ -10,7 +12,9 @@ use Exception::*;
 impl fmt::Display for Exception {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RequestConstructFailed => write!(f, "Failed to construct request object from bytes"),
+            RequestIsNotUtf8 => write!(f, "Request bytes can't be parsed in UTF-8"),
+            UnSupportedRequestMethod => write!(f, "Unsupported request method"),
+            UnsupportedHttpVersion => write!(f, "Unsupported HTTP version"),
         }
     }
 }
