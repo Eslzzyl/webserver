@@ -3,7 +3,7 @@ use serde_derive::Serialize;
 
 use std::fs::File;
 use std::io::prelude::*;
-use std::str::FromStr;
+use core::str;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
@@ -42,6 +42,8 @@ impl Config {
 }
 
 impl Config {
+    /// 本函数应该弃用。当前的Config应该假设是只读的。04-23
+    #[deprecated]
     pub fn to_toml(&self, filename: &str) {
         // 打开文件
         let mut file = match File::create(filename) {
@@ -60,16 +62,8 @@ impl Config {
         &self.www_root
     }
     
-    pub fn set_www_root(&mut self, root: &str) {
-        self.www_root = String::from_str(root).unwrap();
-    }
-
     pub fn port(&self) -> u16 {
         self.port
-    }
-
-    pub fn set_port(&mut self, port: u16) {
-        self.port = port;
     }
 }
 
@@ -82,13 +76,5 @@ mod tests {
         let config = Config::from_toml("files/config.toml");
         assert_eq!(config.www_root(), ".");
         assert_eq!(config.port(), 7878);
-    }
-
-    #[test]
-    fn testing_write() {
-        let mut config = Config::new();
-        config.set_www_root(".");
-        config.set_port(7878);
-        config.to_toml("files/config.toml");
     }
 }

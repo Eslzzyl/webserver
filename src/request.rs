@@ -7,25 +7,13 @@ enum HttpRequestMethod {
     Get,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum HttpRequestVersion {
-    V1_1,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum HttpRequestEncoding {
-    Gzip,
-    Deflate,
-    Br,
-}
-
 #[derive(Debug, Clone)]
 pub struct Request {
     method: HttpRequestMethod,
     path: String,
-    version: HttpRequestVersion,
+    version: HttpVersion,
     user_agent: String,
-    accept_encoding: Vec<HttpRequestEncoding>,  // 压缩编码，可以支持多种编码，如果该vec为空说明不支持压缩
+    accept_encoding: Vec<HttpEncoding>,  // 压缩编码，可以支持多种编码，如果该vec为空说明不支持压缩
 }
 
 impl Request {
@@ -33,9 +21,9 @@ impl Request {
         Self {
             method: HttpRequestMethod::Get,
             path: "".into(),
-            version: HttpRequestVersion::V1_1,
+            version: HttpVersion::V1_1,
             user_agent: "".into(),
-            accept_encoding: Vec::<HttpRequestEncoding>::new(),
+            accept_encoding: Vec::<HttpEncoding>::new(),
         }
     }
 
@@ -72,7 +60,7 @@ impl Request {
         let path = first_line[1].to_string();
         let version = match first_line[2] {
             // 当前只支持1.1
-            r"HTTP/1.1" => HttpRequestVersion::V1_1,
+            r"HTTP/1.1" => HttpVersion::V1_1,
             _ => {
                 println!("Unsupported HTTP version!");
                 return Err(Exception::UnsupportedHttpVersion);
@@ -95,13 +83,13 @@ impl Request {
             if line.starts_with("accept-encoding") || line.starts_with("Accept-Encoding") {
                 let encoding = line.split(": ").collect::<Vec<&str>>()[1];
                 if encoding.contains("gzip") {
-                    accept_encoding.push(HttpRequestEncoding::Gzip);
+                    accept_encoding.push(HttpEncoding::Gzip);
                 }
                 if encoding.contains("deflate") {
-                    accept_encoding.push(HttpRequestEncoding::Deflate);
+                    accept_encoding.push(HttpEncoding::Deflate);
                 }
                 if encoding.contains("br") {
-                    accept_encoding.push(HttpRequestEncoding::Br);
+                    accept_encoding.push(HttpEncoding::Br);
                 }
                 break;
             }

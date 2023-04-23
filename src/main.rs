@@ -6,7 +6,6 @@ mod config;
 mod request;
 mod response;
 
-use param::*;
 use request::Request;
 use config::Config;
 
@@ -38,8 +37,10 @@ async fn main() {
     loop {
         let (mut stream, _) = listener.accept().await.unwrap();
 
+        // 这种写法太野了，之后尽量改一下。一定要避免clone
+        let config_clone = config.clone();
         tokio::spawn(async move{
-            handle_connection(stream, &config).await;
+            handle_connection(stream, &config_clone).await;
         });
     }
 }
@@ -86,6 +87,10 @@ async fn handle_connection(mut stream: TcpStream, config: &Config) {
     // stream.flush().await.unwrap();
 }
 
-fn route(path: &str, config: &Config) -> &str {
-    &(config.www_root().to_owned() + path)
+/// 返回值
+/// bool: 是否有效，1为有效。
+/// 第一个String: 文件的完整路径
+/// 第二个String: MIME类型
+fn route(path: &str, config: &Config) -> (bool, String, String) {
+    
 }
