@@ -42,7 +42,7 @@ impl Response {
         let mut response = Self::new();
         let mut contents = Vec::new();
         file.read_to_end(&mut contents).expect("Failed to read file contents");
-        response.content.copy_from_slice(&contents);
+        response.content = Bytes::from(contents);
         response
     }
 
@@ -69,15 +69,13 @@ impl Response {
     }
 
     /// 预设的404 Response
-    pub fn response_404() -> &'static [u8] {
+    pub fn response_404() -> Vec<u8> {
         let mime = "text/html;charset=utf-8".to_string();
-        let response
-            = Self::from_file(HTML_404.to_string())
-                .set_content_type(mime)
-                .set_date()
-                .set_code(404);
-
-        response.as_bytes()
+        Self::from_file(HTML_404.to_string())
+            .set_content_type(mime)
+            .set_date()
+            .set_code(404)
+            .as_bytes()
     }
 
     pub fn from() -> Self {
@@ -85,7 +83,7 @@ impl Response {
     }
 
     // 注意：首部总是以一个空行（仅包含一个CRLF）结束，即使没有主体部分也是如此。
-    pub fn as_bytes(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> Vec<u8> {
         // 获取各字段的&str
         let version: &str = match self.version {
             HttpVersion::V1_1 => "HTTP/1.1",
@@ -102,16 +100,16 @@ impl Response {
         }.to_string();
 
         // 拼接响应头
-        let b = [
+        let binding = [
             version, " ", status_code, " ", information, CRLF,
             "Content-Type: ", content_type, CRLF,
             "Content-Length: ", content_length, CRLF,
             "Date: ", date, CRLF,
             "Content-Encoding: ", content_encoding, CRLF,
             CRLF,
-        ].concat().as_bytes();
+        ].concat();
         // 拼接响应体
-        &[b, &self.content].concat()
+        [binding.as_bytes(), &self.content].concat()
     }
 }
 

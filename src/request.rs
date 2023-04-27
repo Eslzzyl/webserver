@@ -104,3 +104,20 @@ impl Request {
         })
     }
 }
+
+impl Request {
+    /// 返回当前Request的请求路径
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// 返回当前Request的User-Agent
+    pub fn user_agent(&self) -> &str {
+        &self.user_agent
+    }
+
+    /// 返回当前浏览器接受的压缩编码
+    pub fn accept_encoding(&self) -> &Vec<HttpEncoding> {
+        &self.accept_encoding
+    }
+}
