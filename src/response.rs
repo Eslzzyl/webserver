@@ -3,7 +3,7 @@ use crate::param::*;
 use chrono::prelude::*;
 use bytes::Bytes;
 
-use std::fs::File;
+use std::{fs::File, io::Read};
 
 #[derive(Debug, Clone)]
 pub struct Response {
@@ -38,8 +38,12 @@ impl Response {
     /// 
     /// - path: 文件的完整路径
     fn from_file(path: String) -> Self {
-        let file = File::open(path).unwrap();
-
+        let mut file = File::open(path).expect("Failed to open file");
+        let mut response = Self::new();
+        let mut contents = Vec::new();
+        file.read_to_end(&mut contents).expect("Failed to read file contents");
+        response.content.copy_from_slice(&contents);
+        response
     }
 
     /// 设定时间为当前时刻
@@ -64,7 +68,8 @@ impl Response {
         todo!();
     }
 
-    pub fn response_404() -> Self {
+    /// 预设的404 Response
+    pub fn response_404() -> &'static [u8] {
         let mime = "text/html;charset=utf-8".to_string();
         let response
             = Self::from_file(HTML_404.to_string())
@@ -72,7 +77,7 @@ impl Response {
                 .set_date()
                 .set_code(404);
 
-        return response;
+        response.as_bytes()
     }
 
     pub fn from() -> Self {
@@ -81,6 +86,7 @@ impl Response {
 
     // 注意：首部总是以一个空行（仅包含一个CRLF）结束，即使没有主体部分也是如此。
     pub fn as_bytes(&self) -> &[u8] {
+        // 获取各字段的&str
         let version: &str = match self.version {
             HttpVersion::V1_1 => "HTTP/1.1",
         };
@@ -94,6 +100,8 @@ impl Response {
             HttpEncoding::Deflate => "deflate",
             HttpEncoding::Br => "br"
         }.to_string();
+
+        // 拼接响应头
         let b = [
             version, " ", status_code, " ", information, CRLF,
             "Content-Type: ", content_type, CRLF,
@@ -102,6 +110,7 @@ impl Response {
             "Content-Encoding: ", content_encoding, CRLF,
             CRLF,
         ].concat().as_bytes();
+        // 拼接响应体
         &[b, &self.content].concat()
     }
 }
