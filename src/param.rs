@@ -10,7 +10,7 @@ pub enum HttpVersion {
     V1_1,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HttpEncoding {
     Gzip,
     Deflate,

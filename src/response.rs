@@ -2,7 +2,10 @@ use crate::param::*;
 
 use chrono::prelude::*;
 use bytes::Bytes;
+use flate2::write::{DeflateEncoder, GzEncoder};
+use flate2::Compression;
 
+use std::io::{self, Write};
 use std::{fs::File, io::Read};
 
 #[derive(Debug, Clone)]
@@ -42,7 +45,9 @@ impl Response {
         let mut response = Self::new();
         let mut contents = Vec::new();
         file.read_to_end(&mut contents).expect("Failed to read file contents");
+        contents = compress(contents, HttpEncoding::Gzip).unwrap();
         response.content = Bytes::from(contents);
+        response.content_length = response.content.len();
         response
     }
 
@@ -62,10 +67,6 @@ impl Response {
     fn set_version(&mut self) -> &mut Self {
         self.version = HttpVersion::V1_1;
         self
-    }
-
-    fn compress(&mut self) -> &mut Self {
-        todo!();
     }
 
     /// 预设的404 Response
@@ -97,6 +98,7 @@ impl Response {
         let information: &str = &self.information;
         let content_type: &str = &self.content_type;
         let content_length: &str = &self.content_length.to_string();
+        dbg!(content_length);
         let date: &str = &format_date(&self.date);
         let content_encoding: &str = &match self.content_encoding {
             HttpEncoding::Gzip => "gzip",
@@ -118,9 +120,6 @@ impl Response {
     }
 }
 
-fn format_date(date: &DateTime<Utc>) -> String {
-    date.to_rfc2822()
-}
 
 impl Response {
     /// 设置状态码(Status Code)和状态短语
@@ -183,5 +182,23 @@ impl Response {
             _ => panic!("Invalid status code: {}", code),
         }.to_string();
         self
+    }
+}
+
+fn format_date(date: &DateTime<Utc>) -> String {
+    date.to_rfc2822()
+}
+
+fn compress(data: Vec<u8>, mode: HttpEncoding) -> io::Result<Vec<u8>> {
+    if mode == HttpEncoding::Gzip {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&data)?;
+        encoder.finish()
+    } else if mode == HttpEncoding::Deflate {
+        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&data)?;
+        encoder.finish()
+    } else {
+        panic!();
     }
 }

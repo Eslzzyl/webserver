@@ -86,6 +86,7 @@ async fn handle_connection(mut stream: TcpStream, config: &Config) {
     };
     stream.write(&response).await.unwrap();
     stream.flush().await.unwrap();
+    println!("Write done.");
 }
 
 /// 返回值
@@ -98,6 +99,7 @@ fn route(path: &str, config: &Config) -> (u8, PathBuf, String) {
         return (0, path, "text/html".to_string());
     }
     // 将path转换为绝对路径
+    dbg!(&path);
     let path = Path::new(path).canonicalize().unwrap();
     // 将路径和config.wwwroot拼接
     let binding = config.www_root();
