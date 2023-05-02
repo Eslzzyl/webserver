@@ -37,7 +37,7 @@ impl Response {
     /// 参数：
     /// 
     /// - path: 文件的完整路径
-    fn from_file(path: String) -> Self {
+    fn from_file(path: &str) -> Self {
         let mut file = File::open(path).expect("Failed to open file");
         let mut response = Self::new();
         let mut contents = Vec::new();
@@ -53,8 +53,8 @@ impl Response {
     }
 
     /// 设置content_type即mime
-    fn set_content_type(&mut self, mime: String) -> &mut Self {
-        self.content_type = mime;
+    fn set_content_type(&mut self, mime: &str) -> &mut Self {
+        self.content_type = mime.to_string();
         self
     }
 
@@ -70,16 +70,21 @@ impl Response {
 
     /// 预设的404 Response
     pub fn response_404() -> Vec<u8> {
-        let mime = "text/html;charset=utf-8".to_string();
-        Self::from_file(HTML_404.to_string())
-            .set_content_type(mime)
+        Self::from_file(HTML_404)
+            .set_content_type("text/html;charset=utf-8")
             .set_date()
             .set_code(404)
+            .set_version()
             .as_bytes()
     }
 
-    pub fn from() -> Self {
-        todo!()
+    pub fn from(path: &str, mime: &str) -> Vec<u8> {
+        Self::from_file(path)
+            .set_content_type(mime)
+            .set_date()
+            .set_code(200)
+            .set_version()
+            .as_bytes()
     }
 
     // 注意：首部总是以一个空行（仅包含一个CRLF）结束，即使没有主体部分也是如此。
@@ -164,7 +169,7 @@ impl Response {
             415 => "Unsupported Media Type",
             416 => "Range Not Satisfiable",
             417 => "Expectation Failed",
-            408 => "I'm a teapot",      // 愚人节玩笑，见RFC2324，该状态码不应被使用
+            418 => "I'm a teapot",      // 愚人节玩笑，见RFC2324，该状态码不应被使用
             421 => "Misdirected Request",
             422 => "Unprocessable Content",
             426 => "Upgrade Required",

@@ -8,6 +8,7 @@ mod response;
 
 use request::Request;
 use config::Config;
+use response::Response;
 
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
@@ -50,56 +51,52 @@ async fn main() {
 
 async fn handle_connection(mut stream: TcpStream, config: &Config) {
     let mut buffer = vec![0; 1024];
-    let mut bytes_read: usize = 0;
 
     // 等待tcpstream变得可读
     stream.readable().await.unwrap();
 
     match stream.try_read(&mut buffer) {
-        Ok(n) => bytes_read = n,
         Err(e) => {
             println!("Error when reading from TCP stream!");
             panic!("{}", e);
-        }
+        },
+        _ => {},
     }
 
     // println!("{}", String::from_utf8_lossy(&buffer));
 
     let request = Request::try_from(buffer).unwrap();
-    dbg!(&request);
+    // dbg!(&request);
 
-    let (is_valid, path, mime) = route(&request.path(), config);
+    let (code, path, mime) = route(&request.path(), config);
+    dbg!(&code);
+    dbg!(&path);
+    dbg!(&mime);
 
 
     // 如果path不存在，就返回404。使用Response::response_404
-    
-
-    // let get = b"GET / HTTP/1.1\r\n";
-
-    // let (status_line, filename) = if buffer.starts_with(get) {
-    //     ("HTTP/1.1 200 OK", HTML_INDEX)
-    // } else {
-    //     ("HTTP/1.1 404 NOT FOUND", HTML_404)
-    // };
-
-    // let contents = fs::read_to_string(filename).unwrap();
-
-    // let response = format!(
-    //     "{}\r\nContent-Length: {}\r\n\r\n{}",
-    //     status_line,
-    //     contents.len(),
-    //     contents
-    // );
-
-    // stream.write(response.as_bytes()).await.unwrap();
-    // stream.flush().await.unwrap();
+    let response = if code == 1 {
+        Response::response_404()
+    } else {
+        let path_str = match path.to_str() {
+            Some(s) => s,
+            None => panic!("Failed to convert from path to str!"),
+        };
+        Response::from(path_str, &mime)
+    };
+    stream.write(&response).await.unwrap();
+    stream.flush().await.unwrap();
 }
 
 /// 返回值
-/// bool: 是否有效，1为有效。
+/// code: 状态码。0为正常，1为404
 /// 第一个String: 文件的完整路径
 /// 第二个String: MIME类型
-fn route(path: &str, config: &Config) -> (bool, PathBuf, String) {
+fn route(path: &str, config: &Config) -> (u8, PathBuf, String) {
+    if path == "/" {
+        let path = PathBuf::from("./files/html/index.html");
+        return (0, path, "text/html".to_string());
+    }
     // 将path转换为绝对路径
     let path = Path::new(path).canonicalize().unwrap();
     // 将路径和config.wwwroot拼接
@@ -107,15 +104,18 @@ fn route(path: &str, config: &Config) -> (bool, PathBuf, String) {
     let root = Path::new(&binding);
     let path = root.join(path);
     // 根据文件名确定MIME
-    let mime = match path.extension() {
+    let binding = path.clone();    // 很野的写法，extension会borrow path，导致没法正常返回。尝试寻找解决方法？
+    let mime = match binding.extension() {
         Some(extension) => get_mime(extension),
         None => "text/plain",
     };
     // 返回
-    (path.exists(), path, mime.to_string())
+    (!path.exists() as u8, path, mime.to_string())
 }
 
 /// MIME
+/// 
+/// 全是Copilot生成的，没仔细检查过
 fn get_mime(extension: &OsStr) -> &str {
     match extension.to_str().unwrap() {
         "html" => "text/html",

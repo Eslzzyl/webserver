@@ -36,7 +36,7 @@ impl Request {
             }
         };
 
-        dbg!(&request_string);
+        // dbg!(&request_string);
 
         // TODO 解析请求，然后用解析的结果替代返回值
 
@@ -55,7 +55,7 @@ impl Request {
                 return Err(Exception::UnSupportedRequestMethod);
             }
         };
-        dbg!(method);
+        // dbg!(method);
         // 也许这里应该改写成URI？那是后话
         let path = first_line[1].to_string();
         let version = match first_line[2] {
