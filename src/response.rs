@@ -4,6 +4,8 @@ use chrono::prelude::*;
 use bytes::Bytes;
 use flate2::write::{DeflateEncoder, GzEncoder};
 use flate2::Compression;
+use brotli::enc::{self, backward_references::BrotliEncoderParams};
+use log::{error, warn, info};
 
 use std::io::{self, Write};
 use std::{fs::File, io::Read};
@@ -21,7 +23,16 @@ pub struct Response {
 }
 
 impl Response {
-    /// 生成一个空的Response对象，状态码为200 OK
+    /// 生成一个空的Response对象，各成员默认值为：
+    /// 
+    /// - HTTP版本：`1.1`
+    /// - 状态码：200
+    /// - 响应信息：`OK`
+    /// - Content-Type：`text/plain;charset=utf-8`
+    /// - Content-Length：`0`
+    /// - Date：当前的UTC时间
+    /// - Content-Encoding：明文（无压缩）
+    /// - Content：留空
     pub fn new() -> Self {
         Self {
             version: HttpVersion::V1_1,
@@ -30,7 +41,7 @@ impl Response {
             content_type: "text/plain;charset=utf-8".to_string(),
             content_length: 0,
             date: Utc::now(),
-            content_encoding: HttpEncoding::Gzip,
+            content_encoding: HttpEncoding::None,
             content: Bytes::new(),
         }
     }
@@ -38,16 +49,28 @@ impl Response {
     /// 通过指定的文件构建content域，文件内容是以无压缩字节流的形式写入的
     /// 
     /// 参数：
-    /// 
     /// - path: 文件的完整路径
     fn from_file(path: &str) -> Self {
-        let mut file = File::open(path).expect("Failed to open file");
+        let mut file = match File::open(path) {
+            Ok(f) => f,
+            Err(e) => {
+                error!("无法打开路径{}指定的文件。错误：{}", path, e);
+                panic!();
+            },
+        };
         let mut response = Self::new();
         let mut contents = Vec::new();
-        file.read_to_end(&mut contents).expect("Failed to read file contents");
+        match file.read_to_end(&mut contents) {
+            Ok(_) => {},
+            Err(e) => {
+                error!("无法读取文件{}。错误：{}", path, e);
+                panic!();
+            }
+        }
         contents = compress(contents, HttpEncoding::Gzip).unwrap();
         response.content = Bytes::from(contents);
         response.content_length = response.content.len();
+        response.content_encoding = HttpEncoding::Gzip;
         response
     }
 
@@ -103,7 +126,8 @@ impl Response {
         let content_encoding: &str = &match self.content_encoding {
             HttpEncoding::Gzip => "gzip",
             HttpEncoding::Deflate => "deflate",
-            HttpEncoding::Br => "br"
+            HttpEncoding::Br => "br",
+            HttpEncoding::None => "",   // 实际上这一条是用不到的，后面还会特别检测是不是None。如果是，就直接略去content-encoding字段了。
         }.to_string();
 
         // 拼接响应头
@@ -112,9 +136,22 @@ impl Response {
             "Content-Type: ", content_type, CRLF,
             "Content-Length: ", content_length, CRLF,
             "Date: ", date, CRLF,
-            "Content-Encoding: ", content_encoding, CRLF,
-            CRLF,
         ].concat();
+        let binding = binding.as_str();
+        // 如果 self.content_encoding 是None，就直接跳过这个字段，否则才进行编码
+        dbg!(&self.content_encoding);
+        let binding = if self.content_encoding != HttpEncoding::None {
+            [
+                binding,
+                "Content-Encoding: ", content_encoding, CRLF,
+                CRLF,
+            ].concat()
+        } else {
+            [
+                binding,
+                CRLF,
+            ].concat()
+        };
         // 拼接响应体
         [binding.as_bytes(), &self.content].concat()
     }
@@ -122,9 +159,12 @@ impl Response {
 
 
 impl Response {
-    /// 设置状态码(Status Code)和状态短语
+    /// 本函数实现了RFC9110中定义的所有状态码，尽管大部分可能不会用到。见 [RFC9110#15](https://www.rfc-editor.org/rfc/rfc9110#section-15)
     /// 
-    /// 本函数提供了RFC9110中定义的所有状态码，尽管大部分可能不会用到。见 [RFC9110#15](https://www.rfc-editor.org/rfc/rfc9110#section-15)
+    /// 本函数根据传入的`code`参数设置`self`对象的状态码字段和HTTP信息字段。状态码和信息是一一对应的，这种对应关系由RFC规定。
+    /// 
+    /// 参数：
+    /// - `code`: 状态码。实际上HTTP状态码最大的也就是500多，因此采用`u16`
     fn set_code(&mut self, code: u16) -> &mut Self {
         self.status_code = code;
         self.information = match code {
@@ -179,16 +219,28 @@ impl Response {
             503 => "Service Unavailable",
             504 => "Gateway Timeout",
             505 => "HTTP Version Not Supported",
-            _ => panic!("Invalid status code: {}", code),
+            _ => {
+                error!("非法的状态码：{}。这条错误说明代码编写出现了错误。", code);
+                panic!();
+            },
         }.to_string();
         self
     }
 }
 
+/// 格式化时间，使用`chrono` crate自带的`to_rfc2822`方法
 fn format_date(date: &DateTime<Utc>) -> String {
     date.to_rfc2822()
 }
 
+/// 压缩响应体
+/// 
+/// 参数：
+/// - `data`：响应体数据，以字节流形式给出
+/// - `mode`：指定的压缩格式，见[HttpEncoding]
+/// 
+/// 返回：
+/// - 压缩后的响应体数据，以字节流形式给出
 fn compress(data: Vec<u8>, mode: HttpEncoding) -> io::Result<Vec<u8>> {
     if mode == HttpEncoding::Gzip {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -198,7 +250,15 @@ fn compress(data: Vec<u8>, mode: HttpEncoding) -> io::Result<Vec<u8>> {
         let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&data)?;
         encoder.finish()
+    } else if mode == HttpEncoding::Br {
+        let params = BrotliEncoderParams::default();
+        let mut output = Vec::new();
+        enc::BrotliCompress(&mut io::Cursor::new(data), &mut output, &params)?;
+        Ok(output)
     } else {
+        error!("不支持的压缩编码：{}", mode);
+        // 这个地方先panic算了，之后应该加入自定义的Result和Error，到时候再改。
+        // 实际上不应该直接panic的，应该返回一个Error实例。
         panic!();
     }
 }

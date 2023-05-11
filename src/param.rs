@@ -15,4 +15,26 @@ pub enum HttpEncoding {
     Gzip,
     Deflate,
     Br,
+    None,
+}
+
+use std::fmt;
+
+impl fmt::Display for HttpVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            HttpVersion::V1_1 => write!(f, "1.1"),
+        }
+    }
+}
+
+impl fmt::Display for HttpEncoding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            HttpEncoding::Gzip => write!(f, "gzip"),
+            HttpEncoding::Deflate => write!(f, "deflate"),
+            HttpEncoding::Br => write!(f, "br"),
+            HttpEncoding::None => write!(f, "None"),
+        }
+    }
 }
