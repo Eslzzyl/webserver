@@ -10,16 +10,16 @@ use request::Request;
 use config::Config;
 use response::Response;
 
-use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
 use log4rs;
-use log::{error, warn, info};
 
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::{Path, PathBuf};
 use std::ffi::OsStr;
 use std::time::Instant;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use log::{error, warn, info};
 
 #[tokio::main]
 async fn main() {
@@ -48,17 +48,74 @@ async fn main() {
     };
     info!("端口{}绑定完成", port);
 
-    let mut id: u128 = 0;
+    // 停机命令标志
+    let shutdown_flag = Arc::new(Mutex::new(false));
+    // 活跃连接计数
+    let active_connection = Arc::new(Mutex::new(0u32));
+
+    // 启动异步命令处理任务
+    tokio::spawn({
+        let shutdown_flag = Arc::clone(&shutdown_flag);
+        let active_connection = Arc::clone(&active_connection);
+        async move {
+            let stdin = tokio::io::stdin();
+            let mut reader = BufReader::new(stdin);
+            let mut input = String::new();
+            loop {
+                input.clear();
+                // 在这里处理命令，可以调用服务器的相关函数或执行其他操作
+                if let Ok(_) = reader.read_line(&mut input).await {
+                    let cmd = input.trim();
+                    match cmd {
+                        "stop" => {
+                            // 如果收到 "stop" 命令，则设置停机标志
+                            let mut flag = shutdown_flag.lock().unwrap();
+                            *flag = true;
+                            break;
+                        },
+                        "help" => {
+                            println!("== Webserver Help ==");
+                            println!("输入stop并再发出一次连接请求以停机");
+                            println!("输入status以查看当前服务器状态");
+                            println!("====================");
+                        },
+                        "status" => {
+                            let active_count = *active_connection.lock().unwrap();
+                            println!("== Webserver 状态 ===");
+                            println!("当前连接数: {}", active_count);
+                            println!("====================");
+                        },
+                        _ => {
+                            println!("无效的命令：{}", cmd);
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+    });
 
     let arc_config = Arc::new(config);
 
-    loop {
-        let (stream, _) = listener.accept().await.unwrap();
-        info!("新的TCP连接已建立，ID为{}", id);
+    let mut id: u128 = 0;
 
+    loop {
+        // 检查停机标志，如果设置了停机标志，退出循环
+        if *shutdown_flag.lock().unwrap() {
+            break;
+        }
+        
+        let (stream, _) = listener.accept().await.unwrap();
+        
         let arc_config_clone = Arc::clone(&arc_config);
+        let active_connection_clone = Arc::clone(&active_connection);
+        info!("新的TCP连接已建立，ID为{}", id);
         tokio::spawn(async move {
+            let active_connection = active_connection_clone;
+            *active_connection.lock().unwrap() += 1;
             handle_connection(stream, &arc_config_clone, id).await;
+            *active_connection.lock().unwrap() -= 1;
         });
         id += 1;
     }
@@ -68,7 +125,7 @@ async fn main() {
 /// 
 /// 参数：
 /// - `stream`: 建立好的`TcpStream`
-/// - `config`: Web服务器配置类型，在当前子线程建立时拷贝
+/// - `config`: Web服务器配置类型，在当前子线程建立时使用Arc<T>共享
 /// - `id`: 当前TCP连接的ID
 async fn handle_connection(mut stream: TcpStream, config: &Config, id: u128) {
     let mut buffer = vec![0; 1024];
@@ -114,6 +171,7 @@ async fn handle_connection(mut stream: TcpStream, config: &Config, id: u128) {
     stream.write(&response).await.unwrap();
     stream.flush().await.unwrap();
     info!("[ID{}]HTTP响应已写回", id);
+    return;
 }
 
 /// 路由解析函数

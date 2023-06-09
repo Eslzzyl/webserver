@@ -15,13 +15,7 @@
 
 #### 功能添加和调整
 
-考虑使用httparse库取代http请求头解析部分。但是应注意工作量。
 
-https://github.com/seanmonstar/httparse
-
-添加日志记录功能，找个合适的crate
-
-也许应该加个MIME表，但是还没想到合适的实现。在足够复杂之前先硬编码吧。
 
 #### 注意事项
 
@@ -36,3 +30,5 @@ https://crates.io/crates/flate2
 brotli(br):
 
 https://crates.io/crates/brotli
+
+压缩已经实现，但brotli非常慢，因此默认启用gzip，无论浏览器是否支持brotli。
