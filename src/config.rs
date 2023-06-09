@@ -33,27 +33,10 @@ impl Config {
         };
 
         // 尝试读配置文件，若成功则返回，若失败则返回默认值
-        // 这样写能行吗？
         match toml::from_str(&str_val) {
             Ok(t) => t,
             Err(_) => Config::new()
         }
-    }
-}
-
-impl Config {
-    /// 本函数应该弃用。当前的Config应该假设是只读的。04-23
-    #[deprecated]
-    pub fn to_toml(&self, filename: &str) {
-        // 打开文件
-        let mut file = match File::create(filename) {
-            Ok(f) => f,
-            Err(e) => panic!("no such file {} exception:{}", filename, e)
-        };
-        
-        let toml = toml::to_string(&self).unwrap();
-        // 写文件
-        file.write_all(toml.as_bytes()).unwrap();
     }
 }
 

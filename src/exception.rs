@@ -1,10 +1,5 @@
 use std::fmt;
 
-enum MyResult<T, E> {
-    Ok(T),
-    Err(E),
-}
-
 #[derive(Debug, Copy, Clone)]
 pub enum Exception {
     RequestIsNotUtf8,

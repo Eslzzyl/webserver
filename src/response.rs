@@ -1,11 +1,12 @@
 use crate::param::*;
+use crate::request::Request;
 
 use chrono::prelude::*;
 use bytes::Bytes;
 use flate2::write::{DeflateEncoder, GzEncoder};
 use flate2::Compression;
 use brotli::enc::{self, backward_references::BrotliEncoderParams};
-use log::{error, warn, info};
+use log::{error, info};
 
 use std::io::{self, Write};
 use std::{fs::File, io::Read};
@@ -19,6 +20,7 @@ pub struct Response {
     content_length: usize,
     date: DateTime<Utc>,
     content_encoding: HttpEncoding,     // 响应仅指定一种压缩编码即可。若浏览器支持多种，则具体采用哪种由Config决定
+    server_name: String,
     content: Bytes,
 }
 
@@ -42,6 +44,7 @@ impl Response {
             content_length: 0,
             date: Utc::now(),
             content_encoding: HttpEncoding::None,
+            server_name: SERVER_NAME.to_string(),
             content: Bytes::new(),
         }
     }
@@ -50,11 +53,11 @@ impl Response {
     /// 
     /// 参数：
     /// - path: 文件的完整路径
-    fn from_file(path: &str) -> Self {
+    fn from_file(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128) -> Self {
         let mut file = match File::open(path) {
             Ok(f) => f,
             Err(e) => {
-                error!("无法打开路径{}指定的文件。错误：{}", path, e);
+                error!("[ID{}]无法打开路径{}指定的文件。错误：{}", id, path, e);
                 panic!();
             },
         };
@@ -63,14 +66,29 @@ impl Response {
         match file.read_to_end(&mut contents) {
             Ok(_) => {},
             Err(e) => {
-                error!("无法读取文件{}。错误：{}", path, e);
+                error!("[ID{}]无法读取文件{}。错误：{}", id, path, e);
                 panic!();
             }
         }
-        contents = compress(contents, HttpEncoding::Gzip).unwrap();
+        // 确定响应体压缩编码的逻辑：
+        // 1. 如果浏览器支持Brotli，则使用Brotli。
+        // 2. 否则，如果浏览器支持Gzip，则使用Gzip。
+        // 3. 否则，如果浏览器支持Defalte，则使用Deflate。
+        // 4. 再否则，就只好不压缩了。
+        // 实测Brotli太慢，因此优先用Gzip。考虑后期换一个brotli库。
+        response.content_encoding = if accept_encoding.contains(&HttpEncoding::Gzip) {
+            info!("[ID{}]使用Gzip压缩编码", id);
+            HttpEncoding::Gzip
+        } else if accept_encoding.contains(&HttpEncoding::Deflate) {
+            info!("[ID{}]使用Deflate压缩编码", id);
+            HttpEncoding::Deflate
+        } else {
+            info!("[ID{}]不进行压缩", id);
+            HttpEncoding::None
+        };
+        contents = compress(contents, response.content_encoding).unwrap();
         response.content = Bytes::from(contents);
         response.content_length = response.content.len();
-        response.content_encoding = HttpEncoding::Gzip;
         response
     }
 
@@ -92,9 +110,16 @@ impl Response {
         self
     }
 
+    /// 设置服务器名
+    fn set_server_name(&mut self) -> &mut Self {
+        self.server_name = SERVER_NAME.to_string();
+        self
+    }
+
     /// 预设的404 Response
-    pub fn response_404() -> Vec<u8> {
-        Self::from_file(HTML_404)
+    pub fn response_404(request: &Request, id: u128) -> Vec<u8> {
+        let accept_encoding = request.accept_encoding().to_vec();
+        Self::from_file(HTML_404, accept_encoding, id)
             .set_content_type("text/html;charset=utf-8")
             .set_date()
             .set_code(404)
@@ -102,16 +127,30 @@ impl Response {
             .as_bytes()
     }
 
-    pub fn from(path: &str, mime: &str) -> Vec<u8> {
-        Self::from_file(path)
+    pub fn from(path: &str, mime: &str, request: &Request, id: u128) -> Vec<u8> {
+        let accept_encoding = request.accept_encoding().to_vec();
+        let method = request.method();
+        // 当期仅支持GET方法，其他方法一律返回405
+        if method != HttpRequestMethod::Get {
+            Self::from_file("./files/html/405.html", accept_encoding, id)
+            .set_content_type("text/html;charset=utf-8")
+            .set_date()
+            .set_code(405)
+            .set_version()
+            .set_server_name()
+            .as_bytes()
+        } else {
+            Self::from_file(path, accept_encoding, id)
             .set_content_type(mime)
             .set_date()
             .set_code(200)
             .set_version()
+            .set_server_name()
             .as_bytes()
+        }
     }
 
-    // 注意：首部总是以一个空行（仅包含一个CRLF）结束，即使没有主体部分也是如此。
+
     pub fn as_bytes(&self) -> Vec<u8> {
         // 获取各字段的&str
         let version: &str = match self.version {
@@ -121,7 +160,6 @@ impl Response {
         let information: &str = &self.information;
         let content_type: &str = &self.content_type;
         let content_length: &str = &self.content_length.to_string();
-        dbg!(content_length);
         let date: &str = &format_date(&self.date);
         let content_encoding: &str = &match self.content_encoding {
             HttpEncoding::Gzip => "gzip",
@@ -137,11 +175,12 @@ impl Response {
             "Content-Length: ", content_length, CRLF,
             "Date: ", date, CRLF,
         ].concat();
+        // 不要把下面这行的as_str移动到上面那行，否则会有生命周期问题
         let binding = binding.as_str();
         // 如果 self.content_encoding 是None，就直接跳过这个字段，否则才进行编码
-        dbg!(&self.content_encoding);
         let binding = if self.content_encoding != HttpEncoding::None {
             [
+                // 注意：首部总是以一个空行（仅包含一个CRLF）结束，即使没有主体部分也是如此。
                 binding,
                 "Content-Encoding: ", content_encoding, CRLF,
                 CRLF,
@@ -242,23 +281,26 @@ fn format_date(date: &DateTime<Utc>) -> String {
 /// 返回：
 /// - 压缩后的响应体数据，以字节流形式给出
 fn compress(data: Vec<u8>, mode: HttpEncoding) -> io::Result<Vec<u8>> {
-    if mode == HttpEncoding::Gzip {
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(&data)?;
-        encoder.finish()
-    } else if mode == HttpEncoding::Deflate {
-        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(&data)?;
-        encoder.finish()
-    } else if mode == HttpEncoding::Br {
-        let params = BrotliEncoderParams::default();
-        let mut output = Vec::new();
-        enc::BrotliCompress(&mut io::Cursor::new(data), &mut output, &params)?;
-        Ok(output)
-    } else {
-        error!("不支持的压缩编码：{}", mode);
-        // 这个地方先panic算了，之后应该加入自定义的Result和Error，到时候再改。
-        // 实际上不应该直接panic的，应该返回一个Error实例。
-        panic!();
+    match mode {
+        HttpEncoding::Gzip => {
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(&data)?;
+            encoder.finish()
+        },
+        HttpEncoding::Deflate => {
+            let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(&data)?;
+            encoder.finish()
+        },
+        HttpEncoding::Br => {
+            let params = BrotliEncoderParams::default();
+            let mut output = Vec::new();
+            enc::BrotliCompress(&mut io::Cursor::new(data), &mut output, &params)?;
+            Ok(output)
+        },
+        HttpEncoding::None => {
+            // 无压缩方式，直接返回原文
+            Ok(data)
+        }
     }
 }

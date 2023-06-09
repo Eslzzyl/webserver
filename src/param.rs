@@ -11,6 +11,12 @@ pub enum HttpVersion {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HttpRequestMethod {
+    Post,
+    Get,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HttpEncoding {
     Gzip,
     Deflate,

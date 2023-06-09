@@ -1,14 +1,6 @@
 use crate::exception::Exception;
 use crate::param::*;
 
-use log::{error, warn, info};
-
-#[derive(Debug, Clone, Copy)]
-enum HttpRequestMethod {
-    Post,
-    Get,
-}
-
 #[derive(Debug, Clone)]
 pub struct Request {
     method: HttpRequestMethod,
@@ -49,10 +41,6 @@ impl Request {
                 return Err(Exception::RequestIsNotUtf8);
             }
         };
-
-        // dbg!(&request_string);
-
-        // TODO 解析请求，然后用解析的结果替代返回值
 
         // GET只有请求头，POST还有请求体，当前只考虑GET
 
@@ -110,11 +98,11 @@ impl Request {
         }
 
         Ok(Self {
-            method: method,
-            path: path,
-            version: version,
-            user_agent: user_agent,
-            accept_encoding: accept_encoding,
+            method,
+            path,
+            version,
+            user_agent,
+            accept_encoding,
         })
     }
 }
@@ -123,6 +111,11 @@ impl Request {
     /// 返回当前Request的请求路径
     pub fn path(&self) -> &str {
         &self.path
+    }
+
+    /// 返回请求的方法
+    pub fn method(&self) -> HttpRequestMethod {
+        self.method
     }
 
     /// 返回当前Request的User-Agent

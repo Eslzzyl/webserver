@@ -1,2 +1,2 @@
-www_root = "./"
+www_root = "./files/html"
 port = 7878
