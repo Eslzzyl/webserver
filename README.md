@@ -12,6 +12,7 @@
 - 支持简单的命令行控制
 - 支持通过配置文件自定义 www root 文件夹和监听端口
 - 通过`log4rs`支持简单的日志系统，支持记录到文件或标准输出
+- 通过一个FIFO的文件缓存减少磁盘IO的次数（maybe?）
 
 ### 构建 / Build
 
@@ -37,7 +38,21 @@ cargo run
 
 ### 性能测试 / Benchmark
 
-待补
+```bash
+eslzzyl:~/W/c/webbench-1.5 $ ./webbench -c 1000 -t 10 --get --http11 http://127.0.0.1:7878/
+Webbench - Simple Web Benchmark 1.5
+Copyright (c) Radim Kolar 1997-2004, GPL Open Source Software.
+
+Benchmarking: GET http://127.0.0.1:7878/ (using HTTP/1.1)
+1000 clients, running 10 sec.
+
+Speed=3289968 pages/min, 48856200 bytes/sec.
+Requests: 548328 susceed, 0 failed.
+```
+
+1000并发，再高就不行了，大量fail，悲
+
+测试机器：AMD Ryzen 5 4600U, 16G DDR4, Ubuntu 22.04
 
 ### 参考文献
 
