@@ -1,5 +1,6 @@
 use crate::param::*;
 use crate::request::Request;
+use crate::cache::FileCache;
 
 use chrono::prelude::*;
 use bytes::Bytes;
@@ -9,6 +10,7 @@ use brotli::enc::{self, backward_references::BrotliEncoderParams};
 use log::{error, info};
 
 use std::io::{self, Write};
+use std::sync::{Arc, Mutex};
 use std::{fs::File, io::Read};
 
 #[derive(Debug, Clone)]
@@ -53,30 +55,16 @@ impl Response {
     /// 
     /// 参数：
     /// - path: 文件的完整路径
-    fn from_file(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128) -> Self {
-        let mut file = match File::open(path) {
-            Ok(f) => f,
-            Err(e) => {
-                error!("[ID{}]无法打开路径{}指定的文件。错误：{}", id, path, e);
-                panic!();
-            },
-        };
+    fn from_file(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: Arc<Mutex<FileCache>>) -> Self {
         let mut response = Self::new();
-        let mut contents = Vec::new();
-        match file.read_to_end(&mut contents) {
-            Ok(_) => {},
-            Err(e) => {
-                error!("[ID{}]无法读取文件{}。错误：{}", id, path, e);
-                panic!();
-            }
-        }
+
         // 确定响应体压缩编码的逻辑：
         // 1. 如果浏览器支持Brotli，则使用Brotli。
         // 2. 否则，如果浏览器支持Gzip，则使用Gzip。
         // 3. 否则，如果浏览器支持Defalte，则使用Deflate。
         // 4. 再否则，就只好不压缩了。
         // 实测Brotli太慢，因此优先用Gzip。考虑后期换一个brotli库。
-        response.content_encoding = if accept_encoding.contains(&HttpEncoding::Gzip) {
+        let content_encoding = if accept_encoding.contains(&HttpEncoding::Gzip) {
             info!("[ID{}]使用Gzip压缩编码", id);
             HttpEncoding::Gzip
         } else if accept_encoding.contains(&HttpEncoding::Deflate) {
@@ -86,8 +74,37 @@ impl Response {
             info!("[ID{}]不进行压缩", id);
             HttpEncoding::None
         };
-        contents = compress(contents, response.content_encoding).unwrap();
-        response.content = Bytes::from(contents);
+        
+        let mut cache_lock = cache.lock().unwrap();
+        let (result, bytes) = cache_lock.find(path);
+        if result {     // cache missing
+            info!("[ID{}]缓存未命中", id);
+            let mut file = match File::open(path) {
+                Ok(f) => f,
+                Err(e) => {
+                    error!("[ID{}]无法打开路径{}指定的文件。错误：{}", id, path, e);
+                    panic!();
+                },
+            };
+            let mut contents = Vec::new();
+            match file.read_to_end(&mut contents) {
+                Ok(_) => {},
+                Err(e) => {
+                    error!("[ID{}]无法读取文件{}。错误：{}", id, path, e);
+                    panic!();
+                }
+            }
+            response.content_encoding = content_encoding;
+            contents = compress(contents, response.content_encoding).unwrap();
+            response.content = Bytes::from(contents.clone()); 
+            cache_lock.push(path, Bytes::from(contents));
+        } else {    // cache hit
+            info!("[ID{}]缓存命中", id);
+            response.content = bytes;
+            // 这里其实是有个潜在问题的。理论上不同客户端要求的encoding可能会不同，但是缓存却是共享的，导致encoding是相同的。
+            // 但是单客户端情况下可以忽略。而且目前所有主流浏览器也都支持gzip了。
+            response.content_encoding = content_encoding;
+        }
         response.content_length = response.content.len();
         response
     }
@@ -117,9 +134,9 @@ impl Response {
     }
 
     /// 预设的404 Response
-    pub fn response_404(request: &Request, id: u128) -> Vec<u8> {
+    pub fn response_404(request: &Request, id: u128, cache: Arc<Mutex<FileCache>>) -> Vec<u8> {
         let accept_encoding = request.accept_encoding().to_vec();
-        Self::from_file(HTML_404, accept_encoding, id)
+        Self::from_file(HTML_404, accept_encoding, id, cache)
             .set_content_type("text/html;charset=utf-8")
             .set_date()
             .set_code(404)
@@ -127,12 +144,12 @@ impl Response {
             .as_bytes()
     }
 
-    pub fn from(path: &str, mime: &str, request: &Request, id: u128) -> Vec<u8> {
+    pub fn from(path: &str, mime: &str, request: &Request, id: u128, cache: Arc<Mutex<FileCache>>) -> Vec<u8> {
         let accept_encoding = request.accept_encoding().to_vec();
         let method = request.method();
         // 当期仅支持GET方法，其他方法一律返回405
         if method != HttpRequestMethod::Get {
-            Self::from_file("./files/html/405.html", accept_encoding, id)
+            Self::from_file("./files/html/405.html", accept_encoding, id, cache)
             .set_content_type("text/html;charset=utf-8")
             .set_date()
             .set_code(405)
@@ -140,7 +157,7 @@ impl Response {
             .set_server_name()
             .as_bytes()
         } else {
-            Self::from_file(path, accept_encoding, id)
+            Self::from_file(path, accept_encoding, id, cache)
             .set_content_type(mime)
             .set_date()
             .set_code(200)

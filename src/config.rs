@@ -4,6 +4,7 @@ use serde_derive::Serialize;
 use std::fs::File;
 use std::io::prelude::*;
 use core::str;
+use log::error;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
@@ -35,7 +36,10 @@ impl Config {
         // 尝试读配置文件，若成功则返回，若失败则返回默认值
         match toml::from_str(&str_val) {
             Ok(t) => t,
-            Err(_) => Config::new()
+            Err(_) => {
+                error!("无法成功从配置文件构建配置对象，使用默认配置");
+                Config::new()
+            }
         }
     }
 }

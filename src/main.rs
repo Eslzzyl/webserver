@@ -5,10 +5,12 @@ mod param;
 mod config;
 mod request;
 mod response;
+mod cache;
 
 use request::Request;
 use config::Config;
 use response::Response;
+use cache::FileCache;
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
@@ -21,6 +23,8 @@ use std::time::Instant;
 use std::sync::{Arc, Mutex};
 use log::{error, warn, info};
 
+use crate::param::HTML_INDEX;
+
 #[tokio::main]
 async fn main() {
     log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
@@ -28,6 +32,11 @@ async fn main() {
     let config = Config::from_toml("files/config.toml");
     info!("配置文件已载入");
     info!("www root：{}", config.www_root());
+
+    // 定义一个能够容纳10个文件的cache
+    let cache = Arc::new(
+        Mutex::new(FileCache::from_capacity(10))
+    );
 
     // 监听端口
     let port: u16 = config.port();
@@ -110,11 +119,12 @@ async fn main() {
         
         let active_connection_clone = Arc::clone(&active_connection);
         let root_clone = root.clone();
+        let cache_clone = Arc::clone(&cache);
         info!("新的TCP连接已建立，ID为{}", id);
         tokio::spawn(async move {
             let active_connection = active_connection_clone;
             *active_connection.lock().unwrap() += 1;
-            handle_connection(stream, id, root_clone).await;
+            handle_connection(stream, id, root_clone, cache_clone).await;
             *active_connection.lock().unwrap() -= 1;
         });
         id += 1;
@@ -127,7 +137,7 @@ async fn main() {
 /// - `stream`: 建立好的`TcpStream`
 /// - `config`: Web服务器配置类型，在当前子线程建立时使用Arc<T>共享
 /// - `id`: 当前TCP连接的ID
-async fn handle_connection(mut stream: TcpStream, id: u128, root: String) {
+async fn handle_connection(mut stream: TcpStream, id: u128, root: String, cache: Arc<Mutex<FileCache>>) {
     let mut buffer = vec![0; 1024];
 
     // 等待tcpstream变得可读
@@ -155,7 +165,7 @@ async fn handle_connection(mut stream: TcpStream, id: u128, root: String) {
     // 如果path不存在，就返回404。使用Response::response_404
     let response = if code == 1 {
         warn!("[ID{}]请求的路径：{:?} 不存在，返回404响应", id, path);
-        Response::response_404(&request, id)
+        Response::response_404(&request, id, cache)
     } else {
         let path_str = match path.to_str() {
             Some(s) => s,
@@ -164,7 +174,7 @@ async fn handle_connection(mut stream: TcpStream, id: u128, root: String) {
                 return;
             },
         };
-        Response::from(path_str, &mime, &request, id)
+        Response::from(path_str, &mime, &request, id, cache)
     };
     info!("[ID{}]HTTP响应构建完成，服务端用时{}ms。", id, start_time.elapsed().as_millis());
 
@@ -188,7 +198,7 @@ async fn handle_connection(mut stream: TcpStream, id: u128, root: String) {
 fn route(path: &str, id: u128, root: String) -> (u8, PathBuf, String) {
     if path == "/" {
         info!("[ID{}]请求路径为根目录，返回index", id);
-        let path = PathBuf::from("./files/html/index.html");
+        let path = PathBuf::from(HTML_INDEX);
         return (0, path, "text/html".to_string());
     }
     let mut path_str = path.to_string();
