@@ -49,7 +49,8 @@ impl Request {
 
         // 然后再以空格分割首行
         let first_line: Vec<&str> = request_lines[0].split(" ").collect();
-        let method = match first_line[0] {
+        let method_str = first_line[0].to_uppercase();
+        let method = match method_str.as_str() {
             "GET" => HttpRequestMethod::Get,
             "POST" => HttpRequestMethod::Post,
             _ => {
@@ -57,10 +58,9 @@ impl Request {
                 return Err(Exception::UnSupportedRequestMethod);
             }
         };
-        // dbg!(method);
-        // 也许这里应该改写成URI？那是后话
         let path = first_line[1].to_string();
-        let version = match first_line[2] {
+        let version_str = first_line[2].to_uppercase();
+        let version = match version_str.as_str() {
             // 当前只支持1.1
             r"HTTP/1.1" => HttpVersion::V1_1,
             _ => {

@@ -38,6 +38,8 @@ async fn main() {
     // 拼接socket
     let socket = SocketAddrV4::new(address, port);
 
+    let root = config.www_root().to_string();
+
     // 执行bind
     let listener = match TcpListener::bind(socket).await {
         Ok(listener) => listener,
@@ -96,8 +98,6 @@ async fn main() {
         }
     });
 
-    let arc_config = Arc::new(config);
-
     let mut id: u128 = 0;
 
     loop {
@@ -108,13 +108,13 @@ async fn main() {
         
         let (stream, _) = listener.accept().await.unwrap();
         
-        let arc_config_clone = Arc::clone(&arc_config);
         let active_connection_clone = Arc::clone(&active_connection);
+        let root_clone = root.clone();
         info!("新的TCP连接已建立，ID为{}", id);
         tokio::spawn(async move {
             let active_connection = active_connection_clone;
             *active_connection.lock().unwrap() += 1;
-            handle_connection(stream, &arc_config_clone, id).await;
+            handle_connection(stream, id, root_clone).await;
             *active_connection.lock().unwrap() -= 1;
         });
         id += 1;
@@ -127,7 +127,7 @@ async fn main() {
 /// - `stream`: 建立好的`TcpStream`
 /// - `config`: Web服务器配置类型，在当前子线程建立时使用Arc<T>共享
 /// - `id`: 当前TCP连接的ID
-async fn handle_connection(mut stream: TcpStream, config: &Config, id: u128) {
+async fn handle_connection(mut stream: TcpStream, id: u128, root: String) {
     let mut buffer = vec![0; 1024];
 
     // 等待tcpstream变得可读
@@ -148,7 +148,7 @@ async fn handle_connection(mut stream: TcpStream, config: &Config, id: u128) {
     let request = Request::try_from(buffer).unwrap();
     info!("[ID{}]成功解析HTTP请求", id);
 
-    let (code, path, mime) = route(&request.path(), config, id);
+    let (code, path, mime) = route(&request.path(), id, root);
     info!("[ID{}]HTTP路由解析完毕", id);
 
 
@@ -185,7 +185,7 @@ async fn handle_connection(mut stream: TcpStream, config: &Config, id: u128) {
 /// - `u8`: 状态码。0为正常，1为404
 /// - `PathBuf`: 文件的完整路径
 /// - `String`: MIME类型
-fn route(path: &str, config: &Config, id: u128) -> (u8, PathBuf, String) {
+fn route(path: &str, id: u128, root: String) -> (u8, PathBuf, String) {
     if path == "/" {
         info!("[ID{}]请求路径为根目录，返回index", id);
         let path = PathBuf::from("./files/html/index.html");
@@ -195,8 +195,7 @@ fn route(path: &str, config: &Config, id: u128) -> (u8, PathBuf, String) {
     path_str.remove(0);
     let path = Path::new(&path_str);
     // 将路径和config.wwwroot拼接
-    let binding = config.www_root();
-    let root = Path::new(&binding);
+    let root = Path::new(&root);
     let path = root.join(path);
     info!("[ID{}]请求文件路径：{}", id, path.to_str().unwrap());
     // 根据文件名确定MIME
