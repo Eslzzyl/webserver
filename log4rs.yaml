@@ -24,8 +24,8 @@ appenders:
             # n表示平台无关的换行
             pattern: "{d(%Y-%m-%d %H:%M:%S)} {l} {t} - {m}{n}"
 # 对全局 log 进行配置
-root:
-    level: info
-    appenders:
-        - stdout
-        - log_file
+# root:
+#     level: info
+#     appenders:
+#         - stdout
+#         - log_file

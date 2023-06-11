@@ -14,6 +14,7 @@ use cache::FileCache;
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
+use tokio::runtime::Builder;
 use log4rs;
 
 use std::net::{Ipv4Addr, SocketAddrV4};
@@ -27,15 +28,26 @@ use crate::param::HTML_INDEX;
 
 #[tokio::main]
 async fn main() {
+    // 初始化日志系统
     log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
 
+    // 加载配置文件
     let config = Config::from_toml("files/config.toml");
     info!("配置文件已载入");
-    info!("www root：{}", config.www_root());
+    let root = config.www_root().to_string();
+    info!("www root: {}", &root);
 
-    // 定义一个能够容纳10个文件的cache
+    // 设置工作线程数量
+    let worker_threads = config.worker_threads();
+    let runtime = Builder::new_multi_thread()
+        .worker_threads(worker_threads)
+        .build()
+        .unwrap();
+
+    // 初始化文件缓存
+    let cache_size = config.cache_size();
     let cache = Arc::new(
-        Mutex::new(FileCache::from_capacity(10))
+        Mutex::new(FileCache::from_capacity(cache_size))
     );
 
     // 监听端口
@@ -46,8 +58,6 @@ async fn main() {
     info!("服务端将在{}地址上监听Socket连接", address);
     // 拼接socket
     let socket = SocketAddrV4::new(address, port);
-
-    let root = config.www_root().to_string();
 
     // 执行bind
     let listener = match TcpListener::bind(socket).await {
@@ -65,7 +75,7 @@ async fn main() {
     let active_connection = Arc::new(Mutex::new(0u32));
 
     // 启动异步命令处理任务
-    tokio::spawn({
+    runtime.spawn({
         let shutdown_flag = Arc::clone(&shutdown_flag);
         let active_connection = Arc::clone(&active_connection);
         async move {
@@ -114,18 +124,23 @@ async fn main() {
         if *shutdown_flag.lock().unwrap() {
             break;
         }
-        
-        let (stream, _) = listener.accept().await.unwrap();
-        
+        let (mut stream, addr) = listener.accept().await.unwrap();
+        info!("新的连接：{}", addr);
+
         let active_connection_clone = Arc::clone(&active_connection);
         let root_clone = root.clone();
         let cache_clone = Arc::clone(&cache);
-        info!("新的TCP连接已建立，ID为{}", id);
-        tokio::spawn(async move {
-            let active_connection = active_connection_clone;
-            *active_connection.lock().unwrap() += 1;
-            handle_connection(stream, id, root_clone, cache_clone).await;
-            *active_connection.lock().unwrap() -= 1;
+        info!("[ID{}]TCP连接已建立", id);
+        tokio::task::spawn(async move {
+            {
+                let mut lock = active_connection_clone.lock().unwrap();
+                *lock += 1;
+            }
+            handle_connection(&mut stream, id, root_clone, cache_clone).await;
+            {
+                let mut lock = active_connection_clone.lock().unwrap();
+                *lock -= 1;
+            }
         });
         id += 1;
     }
@@ -137,7 +152,7 @@ async fn main() {
 /// - `stream`: 建立好的`TcpStream`
 /// - `config`: Web服务器配置类型，在当前子线程建立时使用Arc<T>共享
 /// - `id`: 当前TCP连接的ID
-async fn handle_connection(mut stream: TcpStream, id: u128, root: String, cache: Arc<Mutex<FileCache>>) {
+async fn handle_connection(stream: &mut TcpStream, id: u128, root: String, cache: Arc<Mutex<FileCache>>) {
     let mut buffer = vec![0; 1024];
 
     // 等待tcpstream变得可读
@@ -145,7 +160,7 @@ async fn handle_connection(mut stream: TcpStream, id: u128, root: String, cache:
 
     match stream.try_read(&mut buffer) {
         Err(e) => {
-            error!("[ID{}]读取TCPStream时遇到错误：{}", id, e);
+            error!("[ID{}]读取TCPStream时遇到错误: {}", id, e);
             panic!();
         },
         _ => {},
@@ -158,7 +173,7 @@ async fn handle_connection(mut stream: TcpStream, id: u128, root: String, cache:
     let request = Request::try_from(buffer).unwrap();
     info!("[ID{}]成功解析HTTP请求", id);
 
-    let (code, path, mime) = route(&request.path(), id, root);
+    let (code, path, mime) = route(&request.path(), id, root).await;
     info!("[ID{}]HTTP路由解析完毕", id);
 
 
@@ -181,7 +196,6 @@ async fn handle_connection(mut stream: TcpStream, id: u128, root: String, cache:
     stream.write(&response).await.unwrap();
     stream.flush().await.unwrap();
     info!("[ID{}]HTTP响应已写回", id);
-    return;
 }
 
 /// 路由解析函数
@@ -195,7 +209,7 @@ async fn handle_connection(mut stream: TcpStream, id: u128, root: String, cache:
 /// - `u8`: 状态码。0为正常，1为404
 /// - `PathBuf`: 文件的完整路径
 /// - `String`: MIME类型
-fn route(path: &str, id: u128, root: String) -> (u8, PathBuf, String) {
+async fn route(path: &str, id: u128, root: String) -> (u8, PathBuf, String) {
     if path == "/" {
         info!("[ID{}]请求路径为根目录，返回index", id);
         let path = PathBuf::from(HTML_INDEX);
@@ -214,7 +228,7 @@ fn route(path: &str, id: u128, root: String) -> (u8, PathBuf, String) {
         Some(extension) => get_mime(extension),
         None => "text/plain",
     };
-    info!("[ID{}]MIME类型：{}", id, mime);
+    info!("[ID{}]MIME类型: {}", id, mime);
     // 返回
     (!path.exists() as u8, path, mime.to_string())
 }

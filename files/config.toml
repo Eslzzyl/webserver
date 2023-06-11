@@ -1,2 +1,3 @@
 www_root = "./files/html"
 port = 7878
+worker_threads = 0
