@@ -55,7 +55,7 @@ impl Response {
     /// 
     /// 参数：
     /// - path: 文件的完整路径
-    fn from_file(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: Arc<Mutex<FileCache>>) -> Self {
+    fn from_file(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>) -> Self {
         let mut response = Self::new();
 
         // 确定响应体压缩编码的逻辑：
@@ -134,7 +134,7 @@ impl Response {
     }
 
     /// 预设的404 Response
-    pub fn response_404(request: &Request, id: u128, cache: Arc<Mutex<FileCache>>) -> Vec<u8> {
+    pub fn response_404(request: &Request, id: u128, cache: &Arc<Mutex<FileCache>>) -> Vec<u8> {
         let accept_encoding = request.accept_encoding().to_vec();
         Self::from_file(HTML_404, accept_encoding, id, cache)
             .set_content_type("text/html;charset=utf-8")
@@ -144,7 +144,7 @@ impl Response {
             .as_bytes()
     }
 
-    pub fn from(path: &str, mime: &str, request: &Request, id: u128, cache: Arc<Mutex<FileCache>>) -> Vec<u8> {
+    pub fn from(path: &str, mime: &str, request: &Request, id: u128, cache: &Arc<Mutex<FileCache>>) -> Vec<u8> {
         let accept_encoding = request.accept_encoding().to_vec();
         let method = request.method();
         // 当期仅支持GET方法，其他方法一律返回405

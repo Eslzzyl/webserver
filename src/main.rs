@@ -17,6 +17,7 @@ use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
 use tokio::runtime::Builder;
 use log4rs;
 
+use std::io;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::{Path, PathBuf};
 use std::ffi::OsStr;
@@ -136,7 +137,7 @@ async fn main() {
                 let mut lock = active_connection_clone.lock().unwrap();
                 *lock += 1;
             }
-            handle_connection(&mut stream, id, root_clone, cache_clone).await;
+            handle_connection(&mut stream, id, &root_clone, cache_clone).await;
             {
                 let mut lock = active_connection_clone.lock().unwrap();
                 *lock -= 1;
@@ -152,50 +153,61 @@ async fn main() {
 /// - `stream`: 建立好的`TcpStream`
 /// - `config`: Web服务器配置类型，在当前子线程建立时使用Arc<T>共享
 /// - `id`: 当前TCP连接的ID
-async fn handle_connection(stream: &mut TcpStream, id: u128, root: String, cache: Arc<Mutex<FileCache>>) {
+async fn handle_connection(stream: &mut TcpStream, id: u128, root: &str, cache: Arc<Mutex<FileCache>>) {
     let mut buffer = vec![0; 1024];
+    let mut count = 0usize;
 
-    // 等待tcpstream变得可读
-    stream.readable().await.unwrap();
+    loop {
+        // 等待tcpstream变得可读
+        stream.readable().await.unwrap();
 
-    match stream.try_read(&mut buffer) {
-        Err(e) => {
-            error!("[ID{}]读取TCPStream时遇到错误: {}", id, e);
-            panic!();
-        },
-        _ => {},
-    }
-    info!("[ID{}]HTTP请求接收完毕", id);
-
-    // 启动timer
-    let start_time = Instant::now();
-
-    let request = Request::try_from(buffer).unwrap();
-    info!("[ID{}]成功解析HTTP请求", id);
-
-    let (code, path, mime) = route(&request.path(), id, root).await;
-    info!("[ID{}]HTTP路由解析完毕", id);
-
-
-    // 如果path不存在，就返回404。使用Response::response_404
-    let response = if code == 1 {
-        warn!("[ID{}]请求的路径：{:?} 不存在，返回404响应", id, path);
-        Response::response_404(&request, id, cache)
-    } else {
-        let path_str = match path.to_str() {
-            Some(s) => s,
-            None => {
-                error!("[ID{}]无法将路径{:?}转换为str", id, path);
-                return;
+        match stream.try_read(&mut buffer) {
+            Ok(0) => break,
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                continue;
             },
+            Err(e) => {
+                error!("[ID{}]读取TCPStream时遇到错误: {}", id, e);
+                panic!();
+            },
+            _ => {
+                count += 1;
+                info!("[ID{}]第{}次响应", id, count);
+            },
+        }
+        info!("[ID{}]HTTP请求接收完毕", id);
+    
+        // 启动timer
+        let start_time = Instant::now();
+    
+        let request = Request::try_from(&buffer).unwrap();
+        info!("[ID{}]成功解析HTTP请求", id);
+    
+        let (code, path, mime) = route(&request.path(), id, root).await;
+        info!("[ID{}]HTTP路由解析完毕", id);
+    
+    
+        // 如果path不存在，就返回404。使用Response::response_404
+        let response = if code == 1 {
+            warn!("[ID{}]请求的路径：{:?} 不存在，返回404响应", id, path);
+            Response::response_404(&request, id, &cache)
+        } else {
+            let path_str = match path.to_str() {
+                Some(s) => s,
+                None => {
+                    error!("[ID{}]无法将路径{:?}转换为str", id, path);
+                    return;
+                },
+            };
+            Response::from(path_str, &mime, &request, id, &cache)
         };
-        Response::from(path_str, &mime, &request, id, cache)
-    };
-    info!("[ID{}]HTTP响应构建完成，服务端用时{}ms。", id, start_time.elapsed().as_millis());
-
-    stream.write(&response).await.unwrap();
-    stream.flush().await.unwrap();
-    info!("[ID{}]HTTP响应已写回", id);
+        info!("[ID{}]HTTP响应构建完成，服务端用时{}ms。", id, start_time.elapsed().as_millis());
+    
+        stream.write(&response).await.unwrap();
+        stream.flush().await.unwrap();
+        info!("[ID{}]HTTP响应已写回", id);
+    }
+    info!("[ID{}]连接在处理{}个请求后关闭", id, count);
 }
 
 /// 路由解析函数
@@ -209,7 +221,7 @@ async fn handle_connection(stream: &mut TcpStream, id: u128, root: String, cache
 /// - `u8`: 状态码。0为正常，1为404
 /// - `PathBuf`: 文件的完整路径
 /// - `String`: MIME类型
-async fn route(path: &str, id: u128, root: String) -> (u8, PathBuf, String) {
+async fn route(path: &str, id: u128, root: &str) -> (u8, PathBuf, String) {
     if path == "/" {
         info!("[ID{}]请求路径为根目录，返回index", id);
         let path = PathBuf::from(HTML_INDEX);
@@ -219,7 +231,7 @@ async fn route(path: &str, id: u128, root: String) -> (u8, PathBuf, String) {
     path_str.remove(0);
     let path = Path::new(&path_str);
     // 将路径和config.wwwroot拼接
-    let root = Path::new(&root);
+    let root = Path::new(root);
     let path = root.join(path);
     info!("[ID{}]请求文件路径：{}", id, path.to_str().unwrap());
     // 根据文件名确定MIME

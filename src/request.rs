@@ -11,7 +11,6 @@ pub struct Request {
 }
 
 impl Request {
-
     /// 生成一个空的Request对象，各成员默认值为：
     /// 
     /// - 请求方法：`Get`
@@ -33,8 +32,8 @@ impl Request {
     /// 
     /// 参数：
     /// - `buffer`: 来自客户浏览器的请求报文，用字节流表示
-    pub fn try_from(buffer: Vec<u8>) -> Result<Self, Exception> {
-        let request_string = match String::from_utf8(buffer) {
+    pub fn try_from(buffer: &Vec<u8>) -> Result<Self, Exception> {
+        let request_string = match String::from_utf8(buffer.to_vec()) {
             Ok(string) => string,
             Err(_) => {
                 println!("Error when parsing request!");
