@@ -65,7 +65,7 @@ async fn main() {
         Ok(listener) => listener,
         Err(e) => {
             error!("无法绑定端口：{}，错误：{}", port, e);
-            panic!();
+            panic!("无法绑定端口：{}，错误：{}", port, e);
         }
     };
     info!("端口{}绑定完成", port);
@@ -128,18 +128,18 @@ async fn main() {
         let (mut stream, addr) = listener.accept().await.unwrap();
         info!("新的连接：{}", addr);
 
-        let active_connection_clone = Arc::clone(&active_connection);
+        let active_connection_arc = Arc::clone(&active_connection);
         let root_clone = root.clone();
-        let cache_clone = Arc::clone(&cache);
+        let cache_arc = Arc::clone(&cache);
         info!("[ID{}]TCP连接已建立", id);
-        tokio::task::spawn(async move {
+        tokio::spawn(async move {
             {
-                let mut lock = active_connection_clone.lock().unwrap();
+                let mut lock = active_connection_arc.lock().unwrap();
                 *lock += 1;
             }
-            handle_connection(&mut stream, id, &root_clone, cache_clone).await;
+            handle_connection(&mut stream, id, &root_clone, cache_arc).await;
             {
-                let mut lock = active_connection_clone.lock().unwrap();
+                let mut lock = active_connection_arc.lock().unwrap();
                 *lock -= 1;
             }
         });
@@ -155,59 +155,49 @@ async fn main() {
 /// - `id`: 当前TCP连接的ID
 async fn handle_connection(stream: &mut TcpStream, id: u128, root: &str, cache: Arc<Mutex<FileCache>>) {
     let mut buffer = vec![0; 1024];
-    let mut count = 0usize;
 
-    loop {
-        // 等待tcpstream变得可读
-        stream.readable().await.unwrap();
+    // 等待tcpstream变得可读
+    stream.readable().await.unwrap();
 
-        match stream.try_read(&mut buffer) {
-            Ok(0) => break,
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                continue;
-            },
-            Err(e) => {
-                error!("[ID{}]读取TCPStream时遇到错误: {}", id, e);
-                panic!();
-            },
-            _ => {
-                count += 1;
-                info!("[ID{}]第{}次响应", id, count);
-            },
-        }
-        info!("[ID{}]HTTP请求接收完毕", id);
-    
-        // 启动timer
-        let start_time = Instant::now();
-    
-        let request = Request::try_from(&buffer).unwrap();
-        info!("[ID{}]成功解析HTTP请求", id);
-    
-        let (code, path, mime) = route(&request.path(), id, root).await;
-        info!("[ID{}]HTTP路由解析完毕", id);
-    
-    
-        // 如果path不存在，就返回404。使用Response::response_404
-        let response = if code == 1 {
-            warn!("[ID{}]请求的路径：{:?} 不存在，返回404响应", id, path);
-            Response::response_404(&request, id, &cache)
-        } else {
-            let path_str = match path.to_str() {
-                Some(s) => s,
-                None => {
-                    error!("[ID{}]无法将路径{:?}转换为str", id, path);
-                    return;
-                },
-            };
-            Response::from(path_str, &mime, &request, id, &cache)
-        };
-        info!("[ID{}]HTTP响应构建完成，服务端用时{}ms。", id, start_time.elapsed().as_millis());
-    
-        stream.write(&response).await.unwrap();
-        stream.flush().await.unwrap();
-        info!("[ID{}]HTTP响应已写回", id);
+    match stream.try_read(&mut buffer) {
+        Ok(0) => return,
+        Err(e) => {
+            error!("[ID{}]读取TCPStream时遇到错误: {}", id, e);
+            panic!();
+        },
+        _ => {},
     }
-    info!("[ID{}]连接在处理{}个请求后关闭", id, count);
+    info!("[ID{}]HTTP请求接收完毕", id);
+
+    // 启动timer
+    let start_time = Instant::now();
+
+    let request = Request::try_from(&buffer).unwrap();
+    info!("[ID{}]成功解析HTTP请求", id);
+
+    let (code, path, mime) = route(&request.path(), id, root).await;
+    info!("[ID{}]HTTP路由解析完毕", id);
+
+
+    // 如果path不存在，就返回404。使用Response::response_404
+    let response = if code == 1 {
+        warn!("[ID{}]请求的路径：{:?} 不存在，返回404响应", id, path);
+        Response::response_404(&request, id, &cache)
+    } else {
+        let path_str = match path.to_str() {
+            Some(s) => s,
+            None => {
+                error!("[ID{}]无法将路径{:?}转换为str", id, path);
+                return;
+            },
+        };
+        Response::from(path_str, &mime, &request, id, &cache)
+    };
+    info!("[ID{}]HTTP响应构建完成，服务端用时{}ms。", id, start_time.elapsed().as_millis());
+
+    stream.write(&response).await.unwrap();
+    stream.flush().await.unwrap();
+    info!("[ID{}]HTTP响应已写回", id);
 }
 
 /// 路由解析函数
