@@ -1,6 +1,7 @@
 use crate::param::*;
 use crate::request::Request;
 use crate::cache::FileCache;
+use crate::util::HtmlBuilder;
 
 use chrono::prelude::*;
 use bytes::Bytes;
@@ -58,54 +59,58 @@ impl Response {
     fn from_file(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>) -> Self {
         let mut response = Self::new();
 
-        // 确定响应体压缩编码的逻辑：
-        // 1. 如果浏览器支持Brotli，则使用Brotli。
-        // 2. 否则，如果浏览器支持Gzip，则使用Gzip。
-        // 3. 否则，如果浏览器支持Defalte，则使用Deflate。
-        // 4. 再否则，就只好不压缩了。
-        // 实测Brotli太慢，因此优先用Gzip。考虑后期换一个brotli库。
-        let content_encoding = if accept_encoding.contains(&HttpEncoding::Gzip) {
-            info!("[ID{}]使用Gzip压缩编码", id);
-            HttpEncoding::Gzip
-        } else if accept_encoding.contains(&HttpEncoding::Deflate) {
-            info!("[ID{}]使用Deflate压缩编码", id);
-            HttpEncoding::Deflate
-        } else {
-            info!("[ID{}]不进行压缩", id);
-            HttpEncoding::None
+        let content_encoding = decide_encoding(&accept_encoding);
+        match content_encoding {
+            HttpEncoding::Gzip => info!("[ID{}]使用Gzip压缩编码", id),
+            HttpEncoding::Br => info!("[ID{}]使用Brotli压缩编码", id),
+            HttpEncoding::Deflate => info!("[ID{}]使用Deflate压缩编码", id),
+            HttpEncoding::None => info!("[ID{}]不进行压缩", id),
         };
         
+        // 查找缓存
         let mut cache_lock = cache.lock().unwrap();
-        let (result, bytes) = cache_lock.find(path);
-        if result {     // cache missing
-            info!("[ID{}]缓存未命中", id);
-            let mut file = match File::open(path) {
-                Ok(f) => f,
-                Err(e) => {
-                    error!("[ID{}]无法打开路径{}指定的文件。错误：{}", id, path, e);
-                    panic!();
-                },
-            };
-            let mut contents = Vec::new();
-            match file.read_to_end(&mut contents) {
-                Ok(_) => {},
-                Err(e) => {
-                    error!("[ID{}]无法读取文件{}。错误：{}", id, path, e);
-                    panic!();
+        match cache_lock.find(path) {
+            Some(bytes) => {
+                info!("[ID{}]缓存命中", id);
+                response.content = bytes.clone();
+                // 这里其实是有个潜在问题的。理论上不同客户端要求的encoding可能会不同，但是缓存却是共享的，导致encoding是相同的。
+                // 但是单客户端情况下可以忽略。而且目前所有主流浏览器也都支持gzip了。
+                response.content_encoding = content_encoding;
+            },
+            None => {
+                info!("[ID{}]缓存未命中", id);
+                let mut file = match File::open(path) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        error!("[ID{}]无法打开路径{}指定的文件。错误：{}", id, path, e);
+                        panic!();
+                    },
+                };
+                let mut contents = Vec::new();
+                match file.read_to_end(&mut contents) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        error!("[ID{}]无法读取文件{}。错误：{}", id, path, e);
+                        panic!();
+                    }
                 }
+                response.content_encoding = content_encoding;
+                contents = compress(contents, response.content_encoding).unwrap();
+                response.content = Bytes::from(contents.clone()); 
+                cache_lock.push(path, Bytes::from(contents));
             }
-            response.content_encoding = content_encoding;
-            contents = compress(contents, response.content_encoding).unwrap();
-            response.content = Bytes::from(contents.clone()); 
-            cache_lock.push(path, Bytes::from(contents));
-        } else {    // cache hit
-            info!("[ID{}]缓存命中", id);
-            response.content = bytes;
-            // 这里其实是有个潜在问题的。理论上不同客户端要求的encoding可能会不同，但是缓存却是共享的，导致encoding是相同的。
-            // 但是单客户端情况下可以忽略。而且目前所有主流浏览器也都支持gzip了。
-            response.content_encoding = content_encoding;
         }
         response.content_length = response.content.len();
+        response
+    }
+
+    fn from_status_code(code: u16, accept_encoding: Vec<HttpEncoding>) -> Self {
+        let mut response = Self::new();
+        response.content_encoding = decide_encoding(&accept_encoding);
+        let content = HtmlBuilder::from_status_code(code).build();
+        response.content = Bytes::from(content);
+        response.content_length = response.content.len();
+        response.status_code = code;
         response
     }
 
@@ -147,12 +152,11 @@ impl Response {
     pub fn from(path: &str, mime: &str, request: &Request, id: u128, cache: &Arc<Mutex<FileCache>>) -> Vec<u8> {
         let accept_encoding = request.accept_encoding().to_vec();
         let method = request.method();
-        // 当期仅支持GET方法，其他方法一律返回405
+        // 当前仅支持GET方法，其他方法一律返回405
         if method != HttpRequestMethod::Get {
-            Self::from_file("./files/html/405.html", accept_encoding, id, cache)
+            Self::from_status_code(405, accept_encoding)
             .set_content_type("text/html;charset=utf-8")
             .set_date()
-            .set_code(405)
             .set_version()
             .set_server_name()
             .as_bytes()
@@ -223,63 +227,13 @@ impl Response {
     /// - `code`: 状态码。实际上HTTP状态码最大的也就是500多，因此采用`u16`
     fn set_code(&mut self, code: u16) -> &mut Self {
         self.status_code = code;
-        self.information = match code {
-            // 1xx: Informational
-            100 => "Continue",
-            101 => "Switching Protocols",
-            // 2xx: Successful
-            200 => "OK",
-            201 => "Created",
-            202 => "Accepted",
-            203 => "Non-Authoritative Information",
-            204 => "No Content",
-            205 => "Reset Content",
-            206 => "Partial Content",
-            // 3xx: Redirection
-            300 => "Multiple Choices",
-            301 => "Moved Permanently",
-            302 => "Found",
-            303 => "See Other",
-            304 => "Not Modified",
-            305 => "Use Proxy",
-            // 306 已弃用
-            307 => "Temporary Redirect",
-            308 => "Permanent Redirect",
-            // 4xx: Client Error
-            400 => "Bad Request",
-            401 => "Unauthorized",
-            402 => "Payment Required",  // 保留，当前不使用
-            403 => "Forbidden",
-            404 => "Not Found",
-            405 => "Method Not Allowed",
-            406 => "Not Acceptable",
-            407 => "Proxy Authentication Required",
-            408 => "Request Timeout",
-            409 => "Conflict",
-            410 => "Gone",
-            411 => "Length Required",
-            412 => "Precondition Failed",
-            413 => "Content Too Large",
-            414 => "URI Too Long",
-            415 => "Unsupported Media Type",
-            416 => "Range Not Satisfiable",
-            417 => "Expectation Failed",
-            418 => "I'm a teapot",      // 愚人节玩笑，见RFC2324，该状态码不应被使用
-            421 => "Misdirected Request",
-            422 => "Unprocessable Content",
-            426 => "Upgrade Required",
-            // 5xx: Server Error
-            500 => "Internal Server Error",
-            501 => "Not Implemented",
-            502 => "Bad Gateway",
-            503 => "Service Unavailable",
-            504 => "Gateway Timeout",
-            505 => "HTTP Version Not Supported",
-            _ => {
+        self.information = match STATUS_CODES.get(&code) {
+            Some(&info) => info.to_string(),
+            None => {
                 error!("非法的状态码：{}。这条错误说明代码编写出现了错误。", code);
                 panic!();
-            },
-        }.to_string();
+            }
+        };
         self
     }
 }
@@ -319,5 +273,21 @@ fn compress(data: Vec<u8>, mode: HttpEncoding) -> io::Result<Vec<u8>> {
             // 无压缩方式，直接返回原文
             Ok(data)
         }
+    }
+}
+
+// 确定响应体压缩编码的逻辑：
+// 1. 如果浏览器支持Brotli，则使用Brotli。
+// 2. 否则，如果浏览器支持Gzip，则使用Gzip。
+// 3. 否则，如果浏览器支持Defalte，则使用Deflate。
+// 4. 再否则，就只好不压缩了。
+// 实测Brotli太慢，因此优先用Gzip。考虑后期换一个brotli库。
+fn decide_encoding(accept_encoding: &Vec<HttpEncoding>) -> HttpEncoding {
+    if accept_encoding.contains(&HttpEncoding::Gzip) {
+        HttpEncoding::Gzip
+    } else if accept_encoding.contains(&HttpEncoding::Deflate) {
+        HttpEncoding::Deflate
+    } else {
+        HttpEncoding::None
     }
 }

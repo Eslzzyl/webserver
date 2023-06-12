@@ -6,6 +6,7 @@ mod config;
 mod request;
 mod response;
 mod cache;
+mod util;
 
 use request::Request;
 use config::Config;
@@ -17,7 +18,6 @@ use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
 use tokio::runtime::Builder;
 use log4rs;
 
-use std::io;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::{Path, PathBuf};
 use std::ffi::OsStr;

@@ -43,14 +43,7 @@ impl FileCache {
     /// 
     /// 参数：
     /// - `filename`：文件名，也是缓存的key。
-    /// 
-    /// 返回：
-    /// - `bool`：查找是否失败。失败为`true`，此时`Bytes`为空。
-    /// - `Bytes`：找到的数据。仅当`bool`为`false`时此字段才有意义。
-    pub fn find(&self, filename: &str) -> (bool, Bytes) {
-        match self.cache.get(filename) {
-            Some(b) => (false, b.clone()),
-            None => (true, Bytes::new()),
-        }
+    pub fn find(&self, filename: &str) -> Option<&Bytes> {
+        self.cache.get(filename)
     }
 }
