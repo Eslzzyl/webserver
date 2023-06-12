@@ -33,7 +33,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::param::HTML_INDEX;
+use crate::{
+    param::{HTML_INDEX, MIME_TYPES},
+    exception::Exception,
+};
 
 #[tokio::main]
 async fn main() {
@@ -213,12 +216,12 @@ async fn handle_connection(stream: &mut TcpStream, id: u128, root: &str, cache: 
 
 /// 路由解析函数
 /// 
-/// 参数：
+/// ## 参数：
 /// - `path`：请求路径
 /// - `config`：Web服务器配置类型
 /// - `id`: 当前TCP连接的ID
 /// 
-/// 返回：
+/// ## 返回：
 /// - `u8`: 状态码。0为正常，1为404
 /// - `PathBuf`: 文件的完整路径
 /// - `String`: MIME类型
@@ -246,98 +249,15 @@ async fn route(path: &str, id: u128, root: &str) -> (u8, PathBuf, String) {
     (!path.exists() as u8, path, mime.to_string())
 }
 
-/// MIME 保存了常见文件类型的映射关系
+/// MIME
+/// 
+/// 保存了常见文件类型的映射关系
 /// 
 /// https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types
 fn get_mime(extension: &OsStr) -> &str {
-    match extension.to_str().unwrap() {
-        "aac" => "audio/aac",
-        "abw" => "application/x-abiword",
-        "apk" => "application/vnd.android.package-archive",
-        "arc" => "application/x-freearc",
-        "avi" => "video/x-msvideo",
-        "avif" => "image/avif",
-        "azw" => "application/vnd.amazon.ebook",
-        "bin" => "application/octet-stream",
-        "bmp" => "image/bmp",
-        "bz" => "application/x-bzip",
-        "bz2" => "application/x-bzip2",
-        "cab" => "application/vnd.ms-cab-compressed",
-        "cda" => "application/x-cdf",
-        "csh" => "application/x-csh",
-        "css" => "text/css;charset=utf-8",
-        "csv" => "text/csv",
-        "crx" => "application/x-chrome-extension",
-        "deb" => "application/x-deb",
-        "doc" => "application/msword",
-        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "eot" => "application/vnd.ms-fontobject",
-        "epub" => "application/epub+zip",
-        "exe" => "application/x-msdownload",
-        "gif" => "image/gif",
-        "gz" => "application/gzip",
-        "htm" => "text/html;charset=utf-8",
-        "html" => "text/html;charset=utf-8",
-        "img" => "application/x-iso9660-image",
-        "ico" => "image/x-icon",
-        "ics" => "text/calendar",
-        "iso" => "application/x-iso9660-image",
-        "jar" => "application/java-archive",
-        "js" => "text/javascript;charset=utf-8",
-        "json" => "application/json",
-        "jsonld" => "application/ld+json",
-        "jpg" => "image/jpeg",
-        "jpeg" => "image/jpeg",
-        "mid" => "audio/x-midi",
-        "midi" => "audio/x-midi",
-        "mjs" => "text/javascript",
-        "mkv" => "video/x-matroska",
-        "mp3" => "audio/mpeg",
-        "mp4" => "video/mp4",
-        "mpeg" => "video/mpeg",
-        "mpkg" => "application/vnd.apple.installer+xml",
-        "msi" => "application/x-msdownload",
-        "odp" => "application/vnd.oasis.opendocument.presentation",
-        "ods" => "application/vnd.oasis.opendocument.spreadsheet",
-        "odt" => "application/vnd.oasis.opendocument.text",
-        "oga" => "audio/ogg",
-        "ogv" => "video/ogg",
-        "ogx" => "application/ogg",
-        "opus" => "audio/opus",
-        "otf" => "font/otf",
-        "pdf" => "application/pdf",
-        "png" => "image/png",
-        "php" => "application/x-httpd-php",
-        "ppt" => "application/vnd.ms-powerpoint",
-        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "rar" => "application/x-rar-compressed",
-        "rtf" => "application/rtf",
-        "rpm" => "application/x-rpm",
-        "sh" => "application/x-sh",
-        "svg" => "image/svg+xml",
-        "swf" => "application/x-shockwave-flash",
-        "tar" => "application/x-tar",
-        "tif" => "image/tiff",
-        "tiff" => "image/tiff",
-        "ts" => "video/mp2t",
-        "txt" => "text/plain",
-        "ttf" => "font/ttf",
-        "vsd" => "application/vnd.visio",
-        "wav" => "audio/wav",
-        "wasm" => "application/wasm",
-        "weba" => "audio/webm",
-        "webm" => "video/webm",
-        "webp" => "image/webp",
-        "woff" => "font/woff",
-        "woff2" => "font/woff2",
-        "xhtml" => "application/xhtml+xml",
-        "xls" => "application/vnd.ms-excel",
-        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "xml" => "text/xml",
-        "xpi" => "application/x-xpinstall",
-        "xul" => "application/vnd.mozilla.xul+xml",
-        "zip" => "application/zip",
-        "7z" => "application/x-7z-compressed",
-        _ => "application/octet-stream",
+    let key = extension.to_str().unwrap();
+    match MIME_TYPES.get(key) {
+        Some(v) => v,
+        None => "application/octet-stream",
     }
 }
