@@ -5,6 +5,7 @@ pub enum Exception {
     RequestIsNotUtf8,
     UnSupportedRequestMethod,
     UnsupportedHttpVersion,
+    FileNotFound,
 }
 
 use Exception::*;
@@ -15,6 +16,7 @@ impl fmt::Display for Exception {
             RequestIsNotUtf8 => write!(f, "Request bytes can't be parsed in UTF-8"),
             UnSupportedRequestMethod => write!(f, "Unsupported request method"),
             UnsupportedHttpVersion => write!(f, "Unsupported HTTP version"),
+            FileNotFound => write!(f, "File not found (404)"),
         }
     }
 }

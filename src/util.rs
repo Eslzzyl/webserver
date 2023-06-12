@@ -25,7 +25,6 @@ impl HtmlBuilder {
     /// let html418: String = HtmlBuilder::from_status_code(418, None).build();
     /// ```
     pub fn from_status_code(code: u16, note: Option<&str>) -> Self {
-        assert_ne!(code, 404);  // 404有独特的定制html，不应自动生成
         let title = format!("{}", code);
         let css = r"body {
             width: 35em;
@@ -44,7 +43,7 @@ impl HtmlBuilder {
             }
         };
         let body = format!(
-            r"<h2>{}</h2>
+            r"<h1>{}</h1>
             <p>{}</p>", code, description
         );
         Self {

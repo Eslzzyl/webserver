@@ -18,6 +18,8 @@ use std::{
     io::{self, Read, Write},
     sync::{Arc, Mutex},
     fs::File,
+    ffi::OsStr,
+    path::Path,
 };
 
 /// HTTP 响应
@@ -121,19 +123,26 @@ impl Response {
         response
     }
 
-    fn from_status_code(code: u16, accept_encoding: Vec<HttpEncoding>) -> Self {
+    fn from_status_code(code: u16, accept_encoding: Vec<HttpEncoding>, id: u128) -> Self {
         let mut response = Self::new();
         response.content_encoding = decide_encoding(&accept_encoding);
+        match response.content_encoding {
+            HttpEncoding::Gzip => info!("[ID{}]使用Gzip压缩编码", id),
+            HttpEncoding::Br => info!("[ID{}]使用Brotli压缩编码", id),
+            HttpEncoding::Deflate => info!("[ID{}]使用Deflate压缩编码", id),
+            HttpEncoding::None => info!("[ID{}]不进行压缩", id),
+        };
         let content = match code {
-            404 => HtmlBuilder::from_status_code(405, Some(
+            404 => HtmlBuilder::from_status_code(404, Some(
                 r"<h1>噢！</h1><p>你指定的网页无法找到。</p>"
             )),
             405 => HtmlBuilder::from_status_code(405, Some(
                 r"<h1>噢！</h1><p>你的浏览器发出了一个非GET方法的HTTP请求。本服务器目前仅支持GET方法。</p>"
             )),
-            _ => HtmlBuilder::from_status_code(405, None),
+            _ => HtmlBuilder::from_status_code(code, None),
         }.build();
-        response.content = Bytes::from(content);
+        let content_compressed = compress(content.into_bytes(), response.content_encoding).unwrap();
+        response.content = Bytes::from(content_compressed);
         response.content_length = response.content.len();
         response.status_code = code;
         response
@@ -164,9 +173,9 @@ impl Response {
     }
 
     /// 预设的404 Response
-    pub fn response_404(request: &Request, id: u128, cache: &Arc<Mutex<FileCache>>) -> Vec<u8> {
+    pub fn response_404(request: &Request, id: u128) -> Vec<u8> {
         let accept_encoding = request.accept_encoding().to_vec();
-        Self::from_file(HTML_404, accept_encoding, id, cache)
+        Self::from_status_code(404, accept_encoding, id)
             .set_content_type("text/html;charset=utf-8")
             .set_date()
             .set_code(404)
@@ -174,12 +183,20 @@ impl Response {
             .as_bytes()
     }
 
-    pub fn from(path: &str, mime: &str, request: &Request, id: u128, cache: &Arc<Mutex<FileCache>>) -> Vec<u8> {
+    pub fn from(path: &str, request: &Request, id: u128, cache: &Arc<Mutex<FileCache>>) -> Vec<u8> {
         let accept_encoding = request.accept_encoding().to_vec();
         let method = request.method();
+        let extention = match Path::new(path).extension() {
+            Some(e) => e,
+            None => {
+                error!("[ID{}]无法确定请求路径{}的文件扩展名", id, path);
+                return Self::response_404(request, id);
+            }
+        };
+        let mime = get_mime(extention);
         // 当前仅支持GET方法，其他方法一律返回405
         if method != HttpRequestMethod::Get {
-            Self::from_status_code(405, accept_encoding)
+            Self::from_status_code(405, accept_encoding, id)
             .set_content_type("text/html;charset=utf-8")
             .set_date()
             .set_version()
@@ -195,7 +212,6 @@ impl Response {
             .as_bytes()
         }
     }
-
 
     pub fn as_bytes(&self) -> Vec<u8> {
         // 获取各字段的&str
@@ -315,5 +331,24 @@ fn decide_encoding(accept_encoding: &Vec<HttpEncoding>) -> HttpEncoding {
         HttpEncoding::Deflate
     } else {
         HttpEncoding::None
+    }
+}
+
+/// MIME
+/// 
+/// 保存了常见文件类型的映射关系
+/// 
+/// https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types
+fn get_mime(extension: &OsStr) -> &str {
+    let extension = match extension.to_str() {
+        Some(e) => e,
+        None => {
+            error!("无法将&OsStr转换为&str类型");
+            return "application/octet-stream";
+        }
+    };
+    match MIME_TYPES.get(extension) {
+        Some(v) => v,
+        None => "application/octet-stream",
     }
 }

@@ -28,13 +28,12 @@ use log4rs;
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
     path::{Path, PathBuf},
-    ffi::OsStr,
     time::Instant,
     sync::{Arc, Mutex},
 };
 
 use crate::{
-    param::{HTML_INDEX, MIME_TYPES},
+    param::HTML_INDEX,
     exception::Exception,
 };
 
@@ -189,26 +188,35 @@ async fn handle_connection(stream: &mut TcpStream, id: u128, root: &str, cache: 
     let request = Request::try_from(&buffer).unwrap();
     info!("[ID{}]成功解析HTTP请求", id);
 
-    let (code, path, mime) = route(&request.path(), id, root).await;
+    let result = route(&request.path(), id, root).await;
     info!("[ID{}]HTTP路由解析完毕", id);
 
 
     // 如果path不存在，就返回404。使用Response::response_404
-    let response = if code == 1 {
-        warn!("[ID{}]请求的路径：{:?} 不存在，返回404响应", id, path);
-        Response::response_404(&request, id, &cache)
-    } else {
-        let path_str = match path.to_str() {
-            Some(s) => s,
-            None => {
-                error!("[ID{}]无法将路径{:?}转换为str", id, path);
-                return;
-            },
-        };
-        Response::from(path_str, &mime, &request, id, &cache)
+    let response = match result {
+        Ok(path) => {
+            let path_str = match path.to_str() {
+                Some(s) => s,
+                None => {
+                    error!("[ID{}]无法将路径{:?}转换为str", id, path);
+                    return;
+                },
+            };
+            Response::from(path_str, &request, id, &cache)
+        },
+        Err(Exception::FileNotFound) => {
+            warn!("[ID{}]请求的路径：{:?} 不存在，返回404响应", id, &request.path());
+            Response::response_404(&request, id)
+        },
+        Err(e) => {
+            panic!("非法的错误类型：{}", e);
+        }
     };
-    info!("[ID{}]HTTP响应构建完成，服务端用时{}ms。", id, start_time.elapsed().as_millis());
 
+    info!("[ID{}]HTTP响应构建完成，服务端用时{}ms。",
+        id,
+        start_time.elapsed().as_millis()
+    );
     stream.write(&response).await.unwrap();
     stream.flush().await.unwrap();
     info!("[ID{}]HTTP响应已写回", id);
@@ -225,11 +233,11 @@ async fn handle_connection(stream: &mut TcpStream, id: u128, root: &str, cache: 
 /// - `u8`: 状态码。0为正常，1为404
 /// - `PathBuf`: 文件的完整路径
 /// - `String`: MIME类型
-async fn route(path: &str, id: u128, root: &str) -> (u8, PathBuf, String) {
+async fn route(path: &str, id: u128, root: &str) -> Result<PathBuf, Exception> {
     if path == "/" {
         info!("[ID{}]请求路径为根目录，返回index", id);
         let path = PathBuf::from(HTML_INDEX);
-        return (0, path, "text/html".to_string());
+        return Ok(path)
     }
     let mut path_str = path.to_string();
     path_str.remove(0);
@@ -238,26 +246,8 @@ async fn route(path: &str, id: u128, root: &str) -> (u8, PathBuf, String) {
     let root = Path::new(root);
     let path = root.join(path);
     info!("[ID{}]请求文件路径：{}", id, path.to_str().unwrap());
-    // 根据文件名确定MIME
-    let binding = path.clone();    // 很野的写法，extension会borrow path，导致没法正常返回。尝试寻找解决方法？
-    let mime = match binding.extension() {
-        Some(extension) => get_mime(extension),
-        None => "text/plain",
-    };
-    info!("[ID{}]MIME类型: {}", id, mime);
-    // 返回
-    (!path.exists() as u8, path, mime.to_string())
-}
-
-/// MIME
-/// 
-/// 保存了常见文件类型的映射关系
-/// 
-/// https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types
-fn get_mime(extension: &OsStr) -> &str {
-    let key = extension.to_str().unwrap();
-    match MIME_TYPES.get(key) {
-        Some(v) => v,
-        None => "application/octet-stream",
+    match path.exists() {
+        true => Ok(path),
+        false => Err(Exception::FileNotFound),
     }
 }
