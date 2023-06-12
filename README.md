@@ -56,21 +56,41 @@ sudo prlimit --pid [PID] --nofile=32768:32768
 
 #### 测试结果
 
-```bash
-eslzzyl:~/W/c/webbench-1.5 $ ./webbench -c 10000 -t 10 --get --http11 http://127.0.0.1:7878/
-Webbench - Simple Web Benchmark 1.5
-Copyright (c) Radim Kolar 1997-2004, GPL Open Source Software.
+- 本机：
 
-Benchmarking: GET http://127.0.0.1:7878/ (using HTTP/1.1)
-10000 clients, running 10 sec.
+    ```bash
+    eslzzyl:~/W/c/webbench-1.5 $ ./webbench -c 10000 -t 10 --get --http11 http://127.0.0.1:7878/
+    Webbench - Simple Web Benchmark 1.5
+    Copyright (c) Radim Kolar 1997-2004, GPL Open Source Software.
 
-Speed=2991498 pages/min, 44423480 bytes/sec.
-Requests: 498583 susceed, 0 failed.
-```
+    Benchmarking: GET http://127.0.0.1:7878/ (using HTTP/1.1)
+    10000 clients, running 10 sec.
 
-测试20000并发时，端口号不够用了。肯定是我代码的问题，正常不应该是这样的
+    Speed=2991498 pages/min, 44423480 bytes/sec.
+    Requests: 498583 susceed, 0 failed.
+    ```
 
-测试机器：AMD Ryzen 5 4600U, 16G DDR4, Ubuntu 22.04
+    测试20000并发时，端口号不够用了。肯定是我代码的问题，正常不应该是这样的
+
+    测试机器：AMD Ryzen 5 4600U, 16G DDR4, Ubuntu 22.04
+
+- 远程服务器：
+
+    ```bash
+    eslzzyl:~/W/c/webbench-1.5 $ ./webbench -c 10000 -t 10 --get --http11 http://xx.xx.xx.xx:7878/
+    Webbench - Simple Web Benchmark 1.5
+    Copyright (c) Radim Kolar 1997-2004, GPL Open Source Software.
+
+    Benchmarking: GET http://xx.xx.xx.xx:7878/ (using HTTP/1.1)
+    10000 clients, running 10 sec.
+
+    Speed=6864 pages/min, 101930 bytes/sec.
+    Requests: 1144 susceed, 0 failed.
+    ```
+
+    测试20000并发时同样出现问题。
+
+    测试机器：腾讯云上海 1核 2G 1M, Ubuntu 22.04
 
 ### 参考文献
 
@@ -83,7 +103,8 @@ Requests: 498583 susceed, 0 failed.
 
 #### 功能添加和调整
 
-
+- 实现LRU缓存：困难。因为不得不用`unsafe`，而`unsafe`结构在线程之间传递太可怕了。
+- 实现一个HTML Builder。
 
 #### 注意事项
 
