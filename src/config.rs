@@ -15,24 +15,34 @@ use log::{error, warn};
 /// - `port`: 要绑定的本机端口
 /// - `worker_threads`: Tokio的工作线程数量。设置为`0`以使程序自动确定工作线程数量。默认值为CPU的核心数。
 /// - `cache_size`: 文件缓存的大小，即能够容纳多少个文件。
+/// - `local`: 是否工作在内网。
+///     - 如果设置为`true`，则监听IP是`127.0.0.1`
+///     - 如果设置为`false`，则监听IP是`0.0.0.0`
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
     www_root: String,
     port: u16,
     worker_threads: usize,
     cache_size: usize,
+    local: bool,
 }
 
 impl Config {
+    /// 产生一个默认的`Config`对象
     pub fn new() -> Self {
         Self {
             www_root: ".".to_string(),
             port: 7878,
             worker_threads: 0,
             cache_size: 5,
+            local: true,
         }
     }
 
+    /// 通过TOML文件产生配置
+    /// 
+    /// ## 参数：
+    /// - `filename`: TOML文件的路径
     pub fn from_toml(filename: &str) -> Self {
         // 打开文件
         let mut file = match File::open(filename) {
@@ -67,19 +77,28 @@ impl Config {
 }
 
 impl Config {
+    /// 获取 WWW root
     pub fn www_root(&self) -> &str {
         &self.www_root
     }
     
+    /// 获取监听端口号
     pub fn port(&self) -> u16 {
         self.port
     }
 
+    /// 获取工作线程数量
     pub fn worker_threads(&self) -> usize {
         self.worker_threads
     }
 
+    /// 获取缓存大小
     pub fn cache_size(&self) -> usize {
         self.cache_size
+    }
+
+    /// 检查服务器是否工作在内网
+    pub fn local(&self) -> bool {
+        self.local
     }
 }

@@ -1,19 +1,36 @@
-use crate::param::*;
-use crate::request::Request;
-use crate::cache::FileCache;
-use crate::util::HtmlBuilder;
+use crate::{
+    param::*,
+    request::Request,
+    cache::FileCache,
+    util::HtmlBuilder,
+};
 
 use chrono::prelude::*;
 use bytes::Bytes;
-use flate2::write::{DeflateEncoder, GzEncoder};
-use flate2::Compression;
+use flate2::{
+    write::{DeflateEncoder, GzEncoder},
+    Compression,
+};
 use brotli::enc::{self, backward_references::BrotliEncoderParams};
 use log::{error, info};
 
-use std::io::{self, Write};
-use std::sync::{Arc, Mutex};
-use std::{fs::File, io::Read};
+use std::{
+    io::{self, Read, Write},
+    sync::{Arc, Mutex},
+    fs::File,
+};
 
+/// HTTP 响应
+/// 
+/// - `version`: 使用的HTTP版本。目前仅支持1.1
+/// - `status_code`: HTTP状态码
+/// - `information`: 对状态码的说明文字
+/// - `content_type`: MIME
+/// - `content_length`: 响应**体**的长度。不包含响应头。
+/// - `date`: 发送响应时的时间
+/// - `content_encoding`: 指定响应体应当以何种算法进行压缩
+/// - `server_name`: 服务器名
+/// - `content`: 响应体本身
 #[derive(Debug, Clone)]
 pub struct Response {
     version: HttpVersion,
@@ -54,7 +71,7 @@ impl Response {
 
     /// 通过指定的文件构建content域，文件内容是以无压缩字节流的形式写入的
     /// 
-    /// 参数：
+    /// ## 参数：
     /// - path: 文件的完整路径
     fn from_file(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>) -> Self {
         let mut response = Self::new();
@@ -107,7 +124,15 @@ impl Response {
     fn from_status_code(code: u16, accept_encoding: Vec<HttpEncoding>) -> Self {
         let mut response = Self::new();
         response.content_encoding = decide_encoding(&accept_encoding);
-        let content = HtmlBuilder::from_status_code(code).build();
+        let content = match code {
+            404 => HtmlBuilder::from_status_code(405, Some(
+                r"<h1>噢！</h1><p>你指定的网页无法找到。</p>"
+            )),
+            405 => HtmlBuilder::from_status_code(405, Some(
+                r"<h1>噢！</h1><p>你的浏览器发出了一个非GET方法的HTTP请求。本服务器目前仅支持GET方法。</p>"
+            )),
+            _ => HtmlBuilder::from_status_code(405, None),
+        }.build();
         response.content = Bytes::from(content);
         response.content_length = response.content.len();
         response.status_code = code;
@@ -219,11 +244,11 @@ impl Response {
 
 
 impl Response {
-    /// 本函数实现了RFC9110中定义的所有状态码，尽管大部分可能不会用到。见 [RFC9110#15](https://www.rfc-editor.org/rfc/rfc9110#section-15)
+    /// 本函数根据传入的`code`参数设置`self`对象的状态码字段和HTTP信息字段。状态码和信息是一一对应的。
     /// 
-    /// 本函数根据传入的`code`参数设置`self`对象的状态码字段和HTTP信息字段。状态码和信息是一一对应的，这种对应关系由RFC规定。
+    /// 现行HTTP协议的状态码由[RFC9110#15](https://www.rfc-editor.org/rfc/rfc9110#section-15)规定。
     /// 
-    /// 参数：
+    /// ## 参数：
     /// - `code`: 状态码。实际上HTTP状态码最大的也就是500多，因此采用`u16`
     fn set_code(&mut self, code: u16) -> &mut Self {
         self.status_code = code;
@@ -245,11 +270,11 @@ fn format_date(date: &DateTime<Utc>) -> String {
 
 /// 压缩响应体
 /// 
-/// 参数：
+/// ## 参数：
 /// - `data`：响应体数据，以字节流形式给出
 /// - `mode`：指定的压缩格式，见[HttpEncoding]
 /// 
-/// 返回：
+/// ## 返回：
 /// - 压缩后的响应体数据，以字节流形式给出
 fn compress(data: Vec<u8>, mode: HttpEncoding) -> io::Result<Vec<u8>> {
     match mode {
@@ -276,12 +301,13 @@ fn compress(data: Vec<u8>, mode: HttpEncoding) -> io::Result<Vec<u8>> {
     }
 }
 
-// 确定响应体压缩编码的逻辑：
-// 1. 如果浏览器支持Brotli，则使用Brotli。
-// 2. 否则，如果浏览器支持Gzip，则使用Gzip。
-// 3. 否则，如果浏览器支持Defalte，则使用Deflate。
-// 4. 再否则，就只好不压缩了。
-// 实测Brotli太慢，因此优先用Gzip。考虑后期换一个brotli库。
+/// 确定响应体压缩编码的逻辑：
+/// 1. 如果浏览器支持Brotli，则使用Brotli。
+/// 2. 否则，如果浏览器支持Gzip，则使用Gzip。
+/// 3. 否则，如果浏览器支持Deflate，则使用Deflate。
+/// 4. 再否则，就只好不压缩了。
+/// 
+/// 实测Brotli太慢，因此优先用Gzip。考虑后期换一个brotli库。
 fn decide_encoding(accept_encoding: &Vec<HttpEncoding>) -> HttpEncoding {
     if accept_encoding.contains(&HttpEncoding::Gzip) {
         HttpEncoding::Gzip

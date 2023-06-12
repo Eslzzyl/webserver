@@ -15,6 +15,9 @@ pub struct FileCache {
 impl FileCache {
     /// 通过指定缓存大小来创建一个新的缓存
     pub fn from_capacity(capacity: usize) -> Self {
+        if capacity == 0 {
+            panic!("调用from_capacity时指定的大小是0。如果需要自动设置大小，请在调用处进行处理，而不是传入0");
+        }
         Self {
             cache: HashMap::new(),
             capacity,
@@ -41,7 +44,7 @@ impl FileCache {
 
     /// 在缓存中查找数据
     /// 
-    /// 参数：
+    /// ## 参数：
     /// - `filename`：文件名，也是缓存的key。
     pub fn find(&self, filename: &str) -> Option<&Bytes> {
         self.cache.get(filename)

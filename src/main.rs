@@ -13,17 +13,25 @@ use config::Config;
 use response::Response;
 use cache::FileCache;
 
-use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
-use tokio::runtime::Builder;
+use tokio::{
+    net::{TcpListener, TcpStream},
+    io::{
+        AsyncWriteExt,
+        AsyncBufReadExt,
+        BufReader
+    },
+    runtime::Builder,
+};
+use log::{error, warn, info};
 use log4rs;
 
-use std::net::{Ipv4Addr, SocketAddrV4};
-use std::path::{Path, PathBuf};
-use std::ffi::OsStr;
-use std::time::Instant;
-use std::sync::{Arc, Mutex};
-use log::{error, warn, info};
+use std::{
+    net::{Ipv4Addr, SocketAddrV4},
+    path::{Path, PathBuf},
+    ffi::OsStr,
+    time::Instant,
+    sync::{Arc, Mutex},
+};
 
 use crate::param::HTML_INDEX;
 
@@ -55,7 +63,10 @@ async fn main() {
     let port: u16 = config.port();
     info!("服务端将在{}端口上监听Socket连接", port);
     // 地址，本地调试用127.0.0.1
-    let address = Ipv4Addr::new(127, 0, 0, 1);
+    let address = match config.local() {
+        true => Ipv4Addr::new(127, 0, 0, 1),
+        false => Ipv4Addr::new(0, 0, 0, 0)
+    };
     info!("服务端将在{}地址上监听Socket连接", address);
     // 拼接socket
     let socket = SocketAddrV4::new(address, port);
