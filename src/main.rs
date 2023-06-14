@@ -22,7 +22,7 @@ use tokio::{
     },
     runtime::Builder,
 };
-use log::{error, warn, info};
+use log::{error, warn, info, debug};
 use log4rs;
 
 use std::{
@@ -139,12 +139,12 @@ async fn main() {
             break;
         }
         let (mut stream, addr) = listener.accept().await.unwrap();
-        info!("新的连接：{}", addr);
+        debug!("新的连接：{}", addr);
 
         let active_connection_arc = Arc::clone(&active_connection);
         let root_clone = root.clone();
         let cache_arc = Arc::clone(&cache);
-        info!("[ID{}]TCP连接已建立", id);
+        debug!("[ID{}]TCP连接已建立", id);
         tokio::spawn(async move {
             {
                 let mut lock = active_connection_arc.lock().unwrap();
@@ -180,16 +180,16 @@ async fn handle_connection(stream: &mut TcpStream, id: u128, root: &str, cache: 
         },
         _ => {},
     }
-    info!("[ID{}]HTTP请求接收完毕", id);
+    debug!("[ID{}]HTTP请求接收完毕", id);
 
     // 启动timer
     let start_time = Instant::now();
 
     let request = Request::try_from(&buffer).unwrap();
-    info!("[ID{}]成功解析HTTP请求", id);
+    debug!("[ID{}]成功解析HTTP请求", id);
 
     let result = route(&request.path(), id, root).await;
-    info!("[ID{}]HTTP路由解析完毕", id);
+    debug!("[ID{}]HTTP路由解析完毕", id);
 
 
     // 如果path不存在，就返回404。使用Response::response_404
@@ -213,13 +213,23 @@ async fn handle_connection(stream: &mut TcpStream, id: u128, root: &str, cache: 
         }
     };
 
-    info!("[ID{}]HTTP响应构建完成，服务端用时{}ms。",
+    debug!("[ID{}]HTTP响应构建完成，服务端用时{}ms。",
         id,
         start_time.elapsed().as_millis()
     );
-    stream.write(&response).await.unwrap();
+
+    info!("[ID{}] {}, {}, {}, {}, {}, {}, ", id,
+        request.version(),
+        request.path(),
+        request.method(),
+        response.status_code(),
+        response.information(),
+        request.user_agent(),
+    );
+
+    stream.write(&response.as_bytes()).await.unwrap();
     stream.flush().await.unwrap();
-    info!("[ID{}]HTTP响应已写回", id);
+    debug!("[ID{}]HTTP响应已写回", id);
 }
 
 /// 路由解析函数
@@ -235,7 +245,7 @@ async fn handle_connection(stream: &mut TcpStream, id: u128, root: &str, cache: 
 /// - `String`: MIME类型
 async fn route(path: &str, id: u128, root: &str) -> Result<PathBuf, Exception> {
     if path == "/" {
-        info!("[ID{}]请求路径为根目录，返回index", id);
+        debug!("[ID{}]请求路径为根目录，返回index", id);
         let path = PathBuf::from(HTML_INDEX);
         return Ok(path)
     }
@@ -245,7 +255,7 @@ async fn route(path: &str, id: u128, root: &str) -> Result<PathBuf, Exception> {
     // 将路径和config.wwwroot拼接
     let root = Path::new(root);
     let path = root.join(path);
-    info!("[ID{}]请求文件路径：{}", id, path.to_str().unwrap());
+    debug!("[ID{}]请求文件路径：{}", id, path.to_str().unwrap());
     match path.exists() {
         true => Ok(path),
         false => Err(Exception::FileNotFound),

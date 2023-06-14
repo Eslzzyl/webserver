@@ -12,7 +12,7 @@ use flate2::{
     Compression,
 };
 use brotli::enc::{self, backward_references::BrotliEncoderParams};
-use log::{error, info};
+use log::{error, debug};
 
 use std::{
     io::{self, Read, Write},
@@ -85,23 +85,23 @@ impl Response {
         let mut response = Self::new();
         response.content_encoding = decide_encoding(&accept_encoding);
         match response.content_encoding {
-            HttpEncoding::Gzip => info!("[ID{}]使用Gzip压缩编码", id),
-            HttpEncoding::Br => info!("[ID{}]使用Brotli压缩编码", id),
-            HttpEncoding::Deflate => info!("[ID{}]使用Deflate压缩编码", id),
-            HttpEncoding::None => info!("[ID{}]不进行压缩", id),
+            HttpEncoding::Gzip => debug!("[ID{}]使用Gzip压缩编码", id),
+            HttpEncoding::Br => debug!("[ID{}]使用Brotli压缩编码", id),
+            HttpEncoding::Deflate => debug!("[ID{}]使用Deflate压缩编码", id),
+            HttpEncoding::None => debug!("[ID{}]不进行压缩", id),
         };
         
         // 查找缓存
         let mut cache_lock = cache.lock().unwrap();
         match cache_lock.find(path) {
             Some(bytes) => {
-                info!("[ID{}]缓存命中", id);
+                debug!("[ID{}]缓存命中", id);
                 // 这里其实是有个潜在问题的。理论上不同客户端要求的encoding可能会不同，但是缓存却是共享的，导致encoding是相同的。
                 // 但是单客户端情况下可以忽略。而且目前所有主流浏览器也都支持gzip了。
                 response.content = bytes.clone();
             },
             None => {
-                info!("[ID{}]缓存未命中", id);
+                debug!("[ID{}]缓存未命中", id);
                 let mut file = match File::open(path) {
                     Ok(f) => f,
                     Err(e) => {
@@ -139,20 +139,20 @@ impl Response {
         let mut response = Self::new();
         response.content_encoding = decide_encoding(&accept_encoding);
         match response.content_encoding {
-            HttpEncoding::Gzip => info!("[ID{}]使用Gzip压缩编码", id),
-            HttpEncoding::Br => info!("[ID{}]使用Brotli压缩编码", id),
-            HttpEncoding::Deflate => info!("[ID{}]使用Deflate压缩编码", id),
-            HttpEncoding::None => info!("[ID{}]不进行压缩", id),
+            HttpEncoding::Gzip => debug!("[ID{}]使用Gzip压缩编码", id),
+            HttpEncoding::Br => debug!("[ID{}]使用Brotli压缩编码", id),
+            HttpEncoding::Deflate => debug!("[ID{}]使用Deflate压缩编码", id),
+            HttpEncoding::None => debug!("[ID{}]不进行压缩", id),
         };
         let content = match code {
             404 => HtmlBuilder::from_status_code(404, Some(
-                r"<h1>404 Not Found</h1><h2>噢！</h2><p>你指定的网页无法找到。</p>"
+                r"<h2>噢！</h2><p>你指定的网页无法找到。</p>"
             )),
             405 => HtmlBuilder::from_status_code(405, Some(
-                r"<h1>405 Method Not Allowed</h1><h2>噢！</h2><p>你的浏览器发出了一个非GET方法的HTTP请求。本服务器目前仅支持GET方法。</p>"
+                r"<h2>噢！</h2><p>你的浏览器发出了一个非GET方法的HTTP请求。本服务器目前仅支持GET方法。</p>"
             )),
             500 => HtmlBuilder::from_status_code(500, Some(
-                r"<h1>500 Internal Server Error</h1><h2>噢！</h2><p>服务器出现了一个内部错误。</p>"
+                r"<h2>噢！</h2><p>服务器出现了一个内部错误。</p>"
             )),
             _ => HtmlBuilder::from_status_code(code, None),
         }.build();
@@ -177,23 +177,23 @@ impl Response {
         let mut response = Self::new();
         response.content_encoding = decide_encoding(&accept_encoding);
         match response.content_encoding {
-            HttpEncoding::Gzip => info!("[ID{}]使用Gzip压缩编码", id),
-            HttpEncoding::Br => info!("[ID{}]使用Brotli压缩编码", id),
-            HttpEncoding::Deflate => info!("[ID{}]使用Deflate压缩编码", id),
-            HttpEncoding::None => info!("[ID{}]不进行压缩", id),
+            HttpEncoding::Gzip => debug!("[ID{}]使用Gzip压缩编码", id),
+            HttpEncoding::Br => debug!("[ID{}]使用Brotli压缩编码", id),
+            HttpEncoding::Deflate => debug!("[ID{}]使用Deflate压缩编码", id),
+            HttpEncoding::None => debug!("[ID{}]不进行压缩", id),
         };
 
         // 查找缓存
         let mut cache_lock = cache.lock().unwrap();
         match cache_lock.find(path) {
             Some(bytes) => {
-                info!("[ID{}]缓存命中", id);
+                debug!("[ID{}]缓存命中", id);
                 // 这里其实是有个潜在问题的。理论上不同客户端要求的encoding可能会不同，但是缓存却是共享的，导致encoding是相同的。
                 // 但是单客户端情况下可以忽略。而且目前所有主流浏览器也都支持gzip了。
                 response.content = bytes.clone();
             },
             None => {   // 缓存未命中，生成目录列表
-                info!("[ID{}]缓存未命中", id);
+                debug!("[ID{}]缓存未命中", id);
                 let mut dir_vec = Vec::<PathBuf>::new();
                 let entries = fs::read_dir(path).unwrap();
                 for entry in entries.into_iter() {
@@ -234,25 +234,25 @@ impl Response {
     }
 
     /// 预设的404 Response
-    pub fn response_404(request: &Request, id: u128) -> Vec<u8> {
+    pub fn response_404(request: &Request, id: u128) -> Self {
         let accept_encoding = request.accept_encoding().to_vec();
         Self::from_status_code(404, accept_encoding, id)
             .set_content_type("text/html;charset=utf-8")
             .set_date()
             .set_code(404)
             .set_version()
-            .as_bytes()
+            .clone()
     }
 
     /// 预设的500 Response
-    pub fn response_500(request: &Request, id: u128) -> Vec<u8> {
+    pub fn response_500(request: &Request, id: u128) -> Self {
         let accept_encoding = request.accept_encoding().to_vec();
         Self::from_status_code(500, accept_encoding, id)
             .set_content_type("text/html;charset=utf-8")
             .set_date()
             .set_code(500)
             .set_version()
-            .as_bytes()
+            .clone()
     }
 
     /// 通过指定的路径创建一个`response`对象
@@ -265,7 +265,7 @@ impl Response {
     /// 
     /// ## 返回
     /// - HTTP响应，以字节流形式给出
-    pub fn from(path: &str, request: &Request, id: u128, cache: &Arc<Mutex<FileCache>>) -> Vec<u8> {
+    pub fn from(path: &str, request: &Request, id: u128, cache: &Arc<Mutex<FileCache>>) -> Response {
         let accept_encoding = request.accept_encoding().to_vec();
         let method = request.method();
         let metadata_result = fs::metadata(path);
@@ -277,7 +277,7 @@ impl Response {
                 .set_date()
                 .set_version()
                 .set_server_name()
-                .as_bytes();
+                .clone();
         }
 
         match metadata_result {
@@ -289,7 +289,7 @@ impl Response {
                         .set_code(200)
                         .set_version()
                         .set_server_name()
-                        .as_bytes()
+                        .clone()
                 } else {    // path是文件
                     let extention = match Path::new(path).extension() {
                         Some(e) => e,
@@ -305,7 +305,7 @@ impl Response {
                         .set_code(200)
                         .set_version()
                         .set_server_name()
-                        .as_bytes()
+                        .clone()
                 }
             }
             Err(_) => {
@@ -359,6 +359,14 @@ impl Response {
         // 拼接响应体
         [binding.as_bytes(), &self.content].concat()
     }
+
+    pub fn status_code(&self) -> u16 {
+        self.status_code
+    }
+
+    pub fn information(&self) -> &str {
+        &self.information
+    }
 }
 
 
@@ -372,7 +380,7 @@ impl Response {
     fn set_code(&mut self, code: u16) -> &mut Self {
         self.status_code = code;
         self.information = match STATUS_CODES.get(&code) {
-            Some(&info) => info.to_string(),
+            Some(&debug) => debug.to_string(),
             None => {
                 error!("非法的状态码：{}。这条错误说明代码编写出现了错误。", code);
                 panic!();

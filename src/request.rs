@@ -92,6 +92,11 @@ impl Request {
 }
 
 impl Request {
+    /// 返回请求的HTTP协议版本
+    pub fn version(&self) -> &HttpVersion {
+        &self.version
+    }
+
     /// 返回当前Request的请求路径
     pub fn path(&self) -> &str {
         &self.path

@@ -96,6 +96,18 @@ sudo prlimit --pid [PID] --nofile=32768:32768
     Requests: 1144 susceed, 0 failed.
     ```
 
+    ```bash
+    eslzzyl:~/W/c/webbench-1.5 $ ./webbench -c 12000 -t 10 --get --http11 http://xx.xx.xx.xx:7878/
+    Webbench - Simple Web Benchmark 1.5
+    Copyright (c) Radim Kolar 1997-2004, GPL Open Source Software.
+
+    Benchmarking: GET http://xx.xx.xx.xx:7878/ (using HTTP/1.1)
+    12000 clients, running 10 sec.
+
+    Speed=5430 pages/min, 81993 bytes/sec.
+    Requests: 905 susceed, 0 failed.
+    ```
+
     测试20000并发时同样出现问题。
 
     测试机器：腾讯云上海 1核 2G 1M, Ubuntu 22.04

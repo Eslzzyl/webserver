@@ -189,6 +189,15 @@ impl fmt::Display for HttpVersion {
     }
 }
 
+impl fmt::Display for HttpRequestMethod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            HttpRequestMethod::Get => write!(f, "Get"),
+            HttpRequestMethod::Post => write!(f, "Post"),
+        }
+    }
+}
+
 impl fmt::Display for HttpEncoding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
