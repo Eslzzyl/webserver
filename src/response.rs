@@ -17,9 +17,9 @@ use log::{error, info};
 use std::{
     io::{self, Read, Write},
     sync::{Arc, Mutex},
-    fs::File,
+    fs::{self, File},
     ffi::OsStr,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 /// HTTP 响应
@@ -73,13 +73,18 @@ impl Response {
 
     /// 通过指定的文件构建content域，文件内容是以无压缩字节流的形式写入的
     /// 
-    /// ## 参数：
-    /// - path: 文件的完整路径
+    /// ## 参数
+    /// - `path`: 文件的完整路径
+    /// - `accept_encoding`: 浏览器能够接受的压缩编码，需要根据该参数确定压缩编码
+    /// - `id`: 用于日志的TCP连接编号
+    /// - `cache`: 共享的文件缓存指针
+    /// 
+    /// ## 返回
+    /// - 一个新的 Response 对象，不完整，还需要进一步处理才能发回浏览器
     fn from_file(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>) -> Self {
         let mut response = Self::new();
-
-        let content_encoding = decide_encoding(&accept_encoding);
-        match content_encoding {
+        response.content_encoding = decide_encoding(&accept_encoding);
+        match response.content_encoding {
             HttpEncoding::Gzip => info!("[ID{}]使用Gzip压缩编码", id),
             HttpEncoding::Br => info!("[ID{}]使用Brotli压缩编码", id),
             HttpEncoding::Deflate => info!("[ID{}]使用Deflate压缩编码", id),
@@ -91,10 +96,9 @@ impl Response {
         match cache_lock.find(path) {
             Some(bytes) => {
                 info!("[ID{}]缓存命中", id);
-                response.content = bytes.clone();
                 // 这里其实是有个潜在问题的。理论上不同客户端要求的encoding可能会不同，但是缓存却是共享的，导致encoding是相同的。
                 // 但是单客户端情况下可以忽略。而且目前所有主流浏览器也都支持gzip了。
-                response.content_encoding = content_encoding;
+                response.content = bytes.clone();
             },
             None => {
                 info!("[ID{}]缓存未命中", id);
@@ -113,7 +117,6 @@ impl Response {
                         panic!();
                     }
                 }
-                response.content_encoding = content_encoding;
                 contents = compress(contents, response.content_encoding).unwrap();
                 response.content = Bytes::from(contents.clone()); 
                 cache_lock.push(path, Bytes::from(contents));
@@ -123,6 +126,15 @@ impl Response {
         response
     }
 
+    /// 通过状态码创建response对象。content部分由`HtmlBuilder`生成。
+    /// 
+    /// ## 参数
+    /// - `code`: 状态码
+    /// - `accept_encoding`: 浏览器能够接受的压缩编码，需要根据该参数确定压缩编码
+    /// - `id`: 用于日志的TCP连接编号
+    /// 
+    /// ## 返回
+    /// - 一个新的 Response 对象，不完整，还需要进一步处理才能发回浏览器
     fn from_status_code(code: u16, accept_encoding: Vec<HttpEncoding>, id: u128) -> Self {
         let mut response = Self::new();
         response.content_encoding = decide_encoding(&accept_encoding);
@@ -134,10 +146,13 @@ impl Response {
         };
         let content = match code {
             404 => HtmlBuilder::from_status_code(404, Some(
-                r"<h1>噢！</h1><p>你指定的网页无法找到。</p>"
+                r"<h1>404 Not Found</h1><h2>噢！</h2><p>你指定的网页无法找到。</p>"
             )),
             405 => HtmlBuilder::from_status_code(405, Some(
-                r"<h1>噢！</h1><p>你的浏览器发出了一个非GET方法的HTTP请求。本服务器目前仅支持GET方法。</p>"
+                r"<h1>405 Method Not Allowed</h1><h2>噢！</h2><p>你的浏览器发出了一个非GET方法的HTTP请求。本服务器目前仅支持GET方法。</p>"
+            )),
+            500 => HtmlBuilder::from_status_code(500, Some(
+                r"<h1>500 Internal Server Error</h1><h2>噢！</h2><p>服务器出现了一个内部错误。</p>"
             )),
             _ => HtmlBuilder::from_status_code(code, None),
         }.build();
@@ -145,6 +160,52 @@ impl Response {
         response.content = Bytes::from(content_compressed);
         response.content_length = response.content.len();
         response.status_code = code;
+        response
+    }
+
+    /// 通过目录来生成一个 `Response`，该 `Response` 应当列出目录的所有文件。
+    /// 
+    /// ## 参数
+    /// - `path`: 文件的完整路径
+    /// - `accept_encoding`: 浏览器能够接受的压缩编码，需要根据该参数确定压缩编码
+    /// - `id`: 用于日志的TCP连接编号
+    /// - `cache`: 共享的文件缓存指针
+    /// 
+    /// ## 返回
+    /// - 一个新的 Response 对象，不完整，还需要进一步处理才能发回浏览器
+    fn from_fir(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>) -> Self {
+        let mut response = Self::new();
+        response.content_encoding = decide_encoding(&accept_encoding);
+        match response.content_encoding {
+            HttpEncoding::Gzip => info!("[ID{}]使用Gzip压缩编码", id),
+            HttpEncoding::Br => info!("[ID{}]使用Brotli压缩编码", id),
+            HttpEncoding::Deflate => info!("[ID{}]使用Deflate压缩编码", id),
+            HttpEncoding::None => info!("[ID{}]不进行压缩", id),
+        };
+
+        // 查找缓存
+        let mut cache_lock = cache.lock().unwrap();
+        match cache_lock.find(path) {
+            Some(bytes) => {
+                info!("[ID{}]缓存命中", id);
+                // 这里其实是有个潜在问题的。理论上不同客户端要求的encoding可能会不同，但是缓存却是共享的，导致encoding是相同的。
+                // 但是单客户端情况下可以忽略。而且目前所有主流浏览器也都支持gzip了。
+                response.content = bytes.clone();
+            },
+            None => {   // 缓存未命中，生成目录列表
+                info!("[ID{}]缓存未命中", id);
+                let mut dir_vec = Vec::<PathBuf>::new();
+                let entries = fs::read_dir(path).unwrap();
+                for entry in entries.into_iter() {
+                    dir_vec.push(entry.unwrap().path());
+                }
+                let content = HtmlBuilder::from_dir(path, &dir_vec).build();
+                let content_compressed = compress(content.into_bytes(), response.content_encoding).unwrap();
+                response.content = Bytes::from(content_compressed);
+                cache_lock.push(path, response.content.clone());
+            }
+        }
+        response.content_length = response.content.len();
         response
     }
 
@@ -183,36 +244,78 @@ impl Response {
             .as_bytes()
     }
 
+    /// 预设的500 Response
+    pub fn response_500(request: &Request, id: u128) -> Vec<u8> {
+        let accept_encoding = request.accept_encoding().to_vec();
+        Self::from_status_code(500, accept_encoding, id)
+            .set_content_type("text/html;charset=utf-8")
+            .set_date()
+            .set_code(500)
+            .set_version()
+            .as_bytes()
+    }
+
+    /// 通过指定的路径创建一个`response`对象
+    /// 
+    /// ## 参数
+    /// - `path`: 文件的完整路径
+    /// - `request`: 来自浏览器的`request`
+    /// - `id`: 用于日志的TCP连接编号
+    /// - `cache`: 共享的文件缓存指针
+    /// 
+    /// ## 返回
+    /// - HTTP响应，以字节流形式给出
     pub fn from(path: &str, request: &Request, id: u128, cache: &Arc<Mutex<FileCache>>) -> Vec<u8> {
         let accept_encoding = request.accept_encoding().to_vec();
         let method = request.method();
-        let extention = match Path::new(path).extension() {
-            Some(e) => e,
-            None => {
-                error!("[ID{}]无法确定请求路径{}的文件扩展名", id, path);
-                return Self::response_404(request, id);
-            }
-        };
-        let mime = get_mime(extention);
+        let metadata_result = fs::metadata(path);
+
         // 当前仅支持GET方法，其他方法一律返回405
         if method != HttpRequestMethod::Get {
-            Self::from_status_code(405, accept_encoding, id)
-            .set_content_type("text/html;charset=utf-8")
-            .set_date()
-            .set_version()
-            .set_server_name()
-            .as_bytes()
-        } else {
-            Self::from_file(path, accept_encoding, id, cache)
-            .set_content_type(mime)
-            .set_date()
-            .set_code(200)
-            .set_version()
-            .set_server_name()
-            .as_bytes()
+            return Self::from_status_code(405, accept_encoding, id)
+                .set_content_type("text/html;charset=utf-8")
+                .set_date()
+                .set_version()
+                .set_server_name()
+                .as_bytes();
+        }
+
+        match metadata_result {
+            Ok(metadata) => {
+                if metadata.is_dir() {  // path是目录
+                    Self::from_fir(path, accept_encoding, id, cache)
+                        .set_content_type("text/html;charset=utf-8")
+                        .set_date()
+                        .set_code(200)
+                        .set_version()
+                        .set_server_name()
+                        .as_bytes()
+                } else {    // path是文件
+                    let extention = match Path::new(path).extension() {
+                        Some(e) => e,
+                        None => {
+                            error!("[ID{}]无法确定请求路径{}的文件扩展名", id, path);
+                            return Self::response_404(request, id);
+                        }
+                    };
+                    let mime = get_mime(extention);
+                    Self::from_file(path, accept_encoding, id, cache)
+                        .set_content_type(mime)
+                        .set_date()
+                        .set_code(200)
+                        .set_version()
+                        .set_server_name()
+                        .as_bytes()
+                }
+            }
+            Err(_) => {
+                error!("[ID{}]无法获取{}的元数据，产生500 response", id, path);
+                Self::response_500(request, id)
+            }
         }
     }
 
+    /// 将一个 `Response` 对象转换为字节流
     pub fn as_bytes(&self) -> Vec<u8> {
         // 获取各字段的&str
         let version: &str = match self.version {

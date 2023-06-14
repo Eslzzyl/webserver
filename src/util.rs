@@ -1,3 +1,7 @@
+use std::path::PathBuf;
+
+use chrono::{DateTime, Local};
+
 use crate::param::STATUS_CODES;
 
 pub struct HtmlBuilder {
@@ -54,6 +58,70 @@ impl HtmlBuilder {
         }
     }
 
+    pub fn from_dir(path: &str, dir_vec: &Vec<PathBuf>) -> Self {
+        let mut body = String::new();
+        body.push_str(&format!("<h1>{}下的文件列表</h1>", path));
+        body.push_str("<table>");
+        body.push_str(r"<tr>
+            <td>文件名</td>
+            <td>大小</td>
+            <td>修改时间</td>
+            </tr>"
+        );
+        for entry in dir_vec {
+            let metadata = entry.metadata().unwrap();
+            // 使用本地时区格式化为当前本地时间
+            let local_time: DateTime<Local> = metadata.modified().unwrap().into();
+            let formatted_local = local_time.format("%Y-%m-%d %H:%M:%S %Z").to_string();
+            let filename = entry.file_name().unwrap().to_string_lossy();
+            if entry.is_file() {
+                let size = metadata.len();
+                let formatted_size = format_file_size(size);
+                body.push_str(&format!(
+                    r"<tr>
+                        <td>{}</td>
+                        <td>{}</td>
+                        <td>{}</td>
+                    </tr>",
+                    &filename,
+                    &formatted_size,
+                    &formatted_local
+                ));
+            } else if entry.is_dir() {
+                body.push_str(&format!(
+                    r"<tr>
+                        <td>{}</td>
+                        <td>DIR</td>
+                        <td>{}</td>
+                    </tr>",
+                    &filename,
+                    &formatted_local
+                ));
+            } else {
+                panic!();
+            }
+        }
+        body.push_str("</table>");
+        let title = format!("{}", path);
+        let css = r"
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        td {
+            border: 1px solid black;
+            padding: 8px;
+            white-space: pre-wrap; /* 保留换行符和空格 */
+        }".to_string();
+        HtmlBuilder {
+            title,
+            css,
+            script: "".to_string(),
+            body,
+        }
+    }
+
     /// 构建一个`HtmlBuilder`
     pub fn build(&self) -> String {
         format!(r##"<!DOCTYPE html>
@@ -67,4 +135,17 @@ impl HtmlBuilder {
             self.script, self.title, self.css, self.body
         )
     }
+}
+
+fn format_file_size(size: u64) -> String {
+    let units = ["B", "KB", "MB", "GB", "TB"];
+    let mut size = size as f64;
+    let mut unit_index = 0;
+
+    while size >= 1024.0 && unit_index < units.len() - 1 {
+        size /= 1024.0;
+        unit_index += 1;
+    }
+
+    format!("{:.2} {}", size, units[unit_index])
 }
