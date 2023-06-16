@@ -185,7 +185,7 @@ async fn handle_connection(stream: &mut TcpStream, id: u128, root: &str, cache: 
     // 启动timer
     let start_time = Instant::now();
 
-    let request = Request::try_from(&buffer).unwrap();
+    let request = Request::try_from(&buffer, id).unwrap();
     debug!("[ID{}]成功解析HTTP请求", id);
 
     let result = route(&request.path(), id, root).await;
@@ -205,7 +205,7 @@ async fn handle_connection(stream: &mut TcpStream, id: u128, root: &str, cache: 
             Response::from(path_str, &request, id, &cache)
         },
         Err(Exception::FileNotFound) => {
-            warn!("[ID{}]请求的路径：{:?} 不存在，返回404响应", id, &request.path());
+            warn!("[ID{}]请求的路径：{} 不存在，返回404响应", id, &request.path());
             Response::response_404(&request, id)
         },
         Err(e) => {

@@ -2,7 +2,7 @@ use crate::{
     param::*,
     request::Request,
     cache::FileCache,
-    util::HtmlBuilder,
+    util::{HtmlBuilder, handle_php},
 };
 
 use chrono::prelude::*;
@@ -209,6 +209,22 @@ impl Response {
         response
     }
 
+    /// 通过HTML代码生成一个`Response`
+    fn from_html(html: &str, accept_encoding: Vec<HttpEncoding>, id: u128) -> Response {
+        let mut response = Self::new();
+        response.content_encoding = decide_encoding(&accept_encoding);
+        match response.content_encoding {
+            HttpEncoding::Gzip => debug!("[ID{}]使用Gzip压缩编码", id),
+            HttpEncoding::Br => debug!("[ID{}]使用Brotli压缩编码", id),
+            HttpEncoding::Deflate => debug!("[ID{}]使用Deflate压缩编码", id),
+            HttpEncoding::None => debug!("[ID{}]不进行压缩", id),
+        };
+        let content_compressed = compress(Vec::from(html), response.content_encoding).unwrap();
+        response.content = Bytes::from(content_compressed);
+        response.content_length = response.content.len();
+        response
+    }
+
     /// 设定时间为当前时刻
     fn set_date(&mut self) -> &mut Self {
         self.date = Utc::now();
@@ -241,7 +257,7 @@ impl Response {
             .set_date()
             .set_code(404)
             .set_version()
-            .clone()
+            .to_owned()
     }
 
     /// 预设的500 Response
@@ -252,7 +268,7 @@ impl Response {
             .set_date()
             .set_code(500)
             .set_version()
-            .clone()
+            .to_owned()
     }
 
     /// 通过指定的路径创建一个`response`对象
@@ -264,7 +280,7 @@ impl Response {
     /// - `cache`: 共享的文件缓存指针
     /// 
     /// ## 返回
-    /// - HTTP响应，以字节流形式给出
+    /// - HTTP响应
     pub fn from(path: &str, request: &Request, id: u128, cache: &Arc<Mutex<FileCache>>) -> Response {
         let accept_encoding = request.accept_encoding().to_vec();
         let method = request.method();
@@ -277,7 +293,7 @@ impl Response {
                 .set_date()
                 .set_version()
                 .set_server_name()
-                .clone();
+                .to_owned();
         }
 
         match metadata_result {
@@ -289,7 +305,7 @@ impl Response {
                         .set_code(200)
                         .set_version()
                         .set_server_name()
-                        .clone()
+                        .to_owned()
                 } else {    // path是文件
                     let extention = match Path::new(path).extension() {
                         Some(e) => e,
@@ -298,6 +314,22 @@ impl Response {
                             return Self::response_404(request, id);
                         }
                     };
+                    if extention == "php" {
+                        let html = match handle_php(path, id) {
+                            Ok(html) => html,
+                            Err(e) => {
+                                error!("[ID{}]解析PHP文件{}时出错：{}", id, path, e);
+                                return Self::response_500(request, id);
+                            }
+                        };
+                        return Self::from_html(&html, accept_encoding, id)
+                            .set_content_type("text/html;charset=utf-8")
+                            .set_date()
+                            .set_code(200)
+                            .set_version()
+                            .set_server_name()
+                            .to_owned();
+                    }
                     let mime = get_mime(extention);
                     Self::from_file(path, accept_encoding, id, cache)
                         .set_content_type(mime)

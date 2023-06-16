@@ -1,8 +1,15 @@
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    process::Command,
+};
 
 use chrono::{DateTime, Local};
+use log::error;
 
-use crate::param::STATUS_CODES;
+use crate::{
+    param::STATUS_CODES,
+    exception::Exception,
+};
 
 /// `HtmlBuilder`
 /// 
@@ -186,4 +193,24 @@ fn format_file_size(size: u64) -> String {
     }
 
     format!("{:.1} {}", size, units[unit_index])
+}
+
+/// 处理对PHP文件的请求
+pub fn handle_php(path: &str, id: u128) -> Result<String, Exception> {
+    let result = Command::new("php")
+        .arg(path) // PHP文件路径
+        .output();
+    let output = match result {
+        Ok(o) => o,
+        Err(_) => return Err(Exception::PHPExecuteFailed)
+    };
+
+    if output.status.success() {    // 执行完毕
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(String::from(stdout))
+    } else {    // 解释器出错
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        error!("[ID{}]PHP解释器出错：{}", id, stderr);
+        Err(Exception::PHPCodeError)
+    }
 }

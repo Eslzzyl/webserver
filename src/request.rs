@@ -3,6 +3,8 @@ use crate::{
     param::*,
 };
 
+use log::error;
+
 #[derive(Debug, Clone)]
 pub struct Request {
     method: HttpRequestMethod,
@@ -17,11 +19,11 @@ impl Request {
     /// 
     /// ## 参数：
     /// - `buffer`: 来自客户浏览器的请求报文，用字节流表示
-    pub fn try_from(buffer: &Vec<u8>) -> Result<Self, Exception> {
+    pub fn try_from(buffer: &Vec<u8>, id: u128) -> Result<Self, Exception> {
         let request_string = match String::from_utf8(buffer.to_vec()) {
             Ok(string) => string,
             Err(_) => {
-                println!("Error when parsing request!");
+                error!("[ID{}]Error when parsing request!", id);
                 return Err(Exception::RequestIsNotUtf8);
             }
         };
