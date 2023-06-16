@@ -164,7 +164,7 @@ async fn main() {
 /// 
 /// 参数：
 /// - `stream`: 建立好的`TcpStream`
-/// - `config`: Web服务器配置类型，在当前子线程建立时使用Arc<T>共享
+/// - `config`: Web服务器配置类型，在当前子线程建立时使用`Arc<T>`共享
 /// - `id`: 当前TCP连接的ID
 async fn handle_connection(stream: &mut TcpStream, id: u128, root: &str, cache: Arc<Mutex<FileCache>>) {
     let mut buffer = vec![0; 1024];

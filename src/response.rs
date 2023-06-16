@@ -210,6 +210,16 @@ impl Response {
     }
 
     /// 通过HTML代码生成一个`Response`
+    /// 
+    /// ## 参数
+    /// - `html`: HTML代码
+    /// - `accept_encoding`: 浏览器能够接受的压缩编码，需要根据该参数确定压缩编码
+    /// - `id`: 用于日志的TCP连接编号
+    /// 
+    /// ## 返回
+    /// - 一个新的 Response 对象，不完整，还需要进一步处理才能发回浏览器
+    /// 
+    /// 本函数不涉及对文件缓存的访问，因为本函数被设计用来进行PHP的处理，而PHP往往是动态页面。
     fn from_html(html: &str, accept_encoding: Vec<HttpEncoding>, id: u128) -> Response {
         let mut response = Self::new();
         response.content_encoding = decide_encoding(&accept_encoding);
@@ -314,6 +324,7 @@ impl Response {
                             return Self::response_404(request, id);
                         }
                     };
+                    // 特殊情况：文件扩展名是PHP
                     if extention == "php" {
                         let html = match handle_php(path, id) {
                             Ok(html) => html,
@@ -481,7 +492,7 @@ fn decide_encoding(accept_encoding: &Vec<HttpEncoding>) -> HttpEncoding {
 /// 
 /// 保存了常见文件类型的映射关系
 /// 
-/// https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types
+/// <https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types>
 fn get_mime(extension: &OsStr) -> &str {
     let extension = match extension.to_str() {
         Some(e) => e,
