@@ -80,50 +80,69 @@ impl HtmlBuilder {
     /// 
     /// ## 返回
     /// - 一个`HtmlBuilder`对象。要构建它，使用`build()`。
-    pub fn from_dir(path: &str, dir_vec: &Vec<PathBuf>) -> Self {
+    pub fn from_dir(path: &str, dir_vec: &mut Vec<PathBuf>) -> Self {
         let mut body = String::new();
-        body.push_str(&format!("<h1>{}下的文件列表</h1>", path));
+        sort_dir_entries(dir_vec);
+
+        let mut path_mut = path;
+        // 如果path是以"/"结尾的，就移除它
+        if path_mut.ends_with("/") {
+            let len = path_mut.len();
+            path_mut = &path_mut[..(len-1)];
+        }
+        // 下面的`<hr>`添加了一条水平分割线
+        body.push_str(&format!("<h1>{}的文件列表</h1><hr>", path_mut));
         body.push_str("<table>");
-        body.push_str(r"
+        body.push_str(r#"
             <tr>
                 <td>文件名</td>
                 <td>大小</td>
                 <td>修改时间</td>
             </tr>
-            "
+            <tr>
+                <td><a href="../">..</a></td>
+                <td></td>
+                <td></td>
+            </tr>
+            "#
         );
         for entry in dir_vec {
             let metadata = entry.metadata().unwrap();
             // 使用本地时区格式化为当前本地时间
             let local_time: DateTime<Local> = metadata.modified().unwrap().into();
-            let formatted_local = local_time.format("%Y-%m-%d %H:%M:%S %Z").to_string();
+            let formatted_time = local_time.format("%Y-%m-%d %H:%M:%S %Z").to_string();
+        
             let filename = entry.file_name().unwrap().to_string_lossy();
+
             if entry.is_file() {
                 let size = metadata.len();
                 let formatted_size = format_file_size(size);
                 body.push_str(&format!(
-                    r"
+                    r#"
                     <tr>
-                        <td>{}</td>
+                        <td><a href="{}">{}</a></td>
                         <td>{}</td>
                         <td>{}</td>
                     </tr>
-                    ",
+                    "#,
+                    &filename,
                     &filename,
                     &formatted_size,
-                    &formatted_local
+                    &formatted_time
                 ));
             } else if entry.is_dir() {
+                let filename = [&filename, "/"].concat();
                 body.push_str(&format!(
-                    r"
+                    r#"
                     <tr>
-                        <td>{}</td>
-                        <td>DIR</td>
+                    <td><a href="{}">{}</a></td>
+                        <td>文件夹</td>
                         <td>{}</td>
                     </tr>
-                    ",
+                    "#,
                     &filename,
-                    &formatted_local
+                    &filename,
+                    &formatted_time
                 ));
             } else {
                 // 虽然我觉得这个条件永远不会被访问到。
@@ -131,7 +150,7 @@ impl HtmlBuilder {
             }
         }
         body.push_str("</table>");
-        let title = format!("{}", path);
+        let title = format!("{}的文件列表", path);
         let css = r"
             table {
                 border-collapse: collapse;
@@ -159,6 +178,7 @@ impl HtmlBuilder {
     /// 构建一个`HtmlBuilder`
     pub fn build(&self) -> String {
         format!(r##"<!DOCTYPE html>
+            <!-- 本文件由Eslzzyl的Rust Webserver自动生成 -->
             <html>
                 <head>
                     <meta charset="utf-8">
@@ -193,6 +213,26 @@ fn format_file_size(size: u64) -> String {
     }
 
     format!("{:.1} {}", size, units[unit_index])
+}
+
+/// 对文件列表进行排序，使满足：
+/// 
+/// - 文件夹在前面
+/// - 文件在后面
+/// - 文件夹和文件按照各自的顺序排列
+fn sort_dir_entries(vec: &mut Vec<PathBuf>) {
+    vec.sort_by(|a, b| {
+        let a_is_dir = a.is_dir();
+        let b_is_dir = b.is_dir();
+
+        if a_is_dir && !b_is_dir {
+            std::cmp::Ordering::Less
+        } else if !a_is_dir && b_is_dir {
+            std::cmp::Ordering::Greater
+        } else {
+            a.cmp(b)
+        }
+    });
 }
 
 /// 处理对PHP文件的请求

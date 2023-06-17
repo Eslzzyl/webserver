@@ -173,7 +173,7 @@ impl Response {
     /// 
     /// ## 返回
     /// - 一个新的 Response 对象，不完整，还需要进一步处理才能发回浏览器
-    fn from_fir(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>) -> Self {
+    fn from_dir(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>) -> Self {
         let mut response = Self::new();
         response.content_encoding = decide_encoding(&accept_encoding);
         match response.content_encoding {
@@ -199,7 +199,7 @@ impl Response {
                 for entry in entries.into_iter() {
                     dir_vec.push(entry.unwrap().path());
                 }
-                let content = HtmlBuilder::from_dir(path, &dir_vec).build();
+                let content = HtmlBuilder::from_dir(path, &mut dir_vec).build();
                 let content_compressed = compress(content.into_bytes(), response.content_encoding).unwrap();
                 response.content = Bytes::from(content_compressed);
                 cache_lock.push(path, response.content.clone());
@@ -309,7 +309,7 @@ impl Response {
         match metadata_result {
             Ok(metadata) => {
                 if metadata.is_dir() {  // path是目录
-                    Self::from_fir(path, accept_encoding, id, cache)
+                    Self::from_dir(path, accept_encoding, id, cache)
                         .set_content_type("text/html;charset=utf-8")
                         .set_date()
                         .set_code(200)
