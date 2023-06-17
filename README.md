@@ -162,8 +162,9 @@ sudo prlimit --pid [PID] --nofile=32768:32768
 
 #### 功能添加和调整
 
-- 实现LRU缓存：困难。因为不得不用`unsafe`，而`unsafe`结构在线程之间传递太可怕了。
-- 为文件夹列表添加超链接支持
+- ~实现LRU缓存：困难。因为不得不用`unsafe`，而`unsafe`结构在线程之间传递太可怕了。~
+- 支持`HEAD`方法（容易）：https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Methods/HEAD
+- 支持`OPTIONS`方法（尝试）：https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Methods/OPTIONS
 - 看一看PHP的安全性方面有没有能挖掘的地方
 
 找个机会精简一下依赖，目前依赖快100个，编译太慢了，很多依赖只是用到一个简单的功能，没必要用库。尤其是`Config`的读取那部分，`serde`的依赖有很多
