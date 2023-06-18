@@ -24,12 +24,14 @@ use tokio::{
 };
 use log::{error, warn, info, debug};
 use log4rs;
+use regex::Regex;
 
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
     path::{Path, PathBuf},
     time::Instant,
     sync::{Arc, Mutex},
+    process::Command,
 };
 
 use crate::{
@@ -60,6 +62,31 @@ async fn main() {
     let cache = Arc::new(
         Mutex::new(FileCache::from_capacity(cache_size))
     );
+
+    // 检测PHP环境
+    let php_result = Command::new("php")
+        .arg("-v")
+        .output();
+    match php_result {
+        Ok(o) => {
+            if o.status.success() {
+                let output = String::from_utf8_lossy(&o.stdout);
+                // 使用正则表达式捕获版本号
+                let re = Regex::new(r"PHP (\d+\.\d+\.\d+-\dubuntu\d+\.\d+)").unwrap();
+                if let Some(capture) = re.captures(&output) {
+                    if let Some(version) = capture.get(1) {
+                        info!("找到PHP解释器，版本：{}", version.as_str());
+                    }
+                }
+            } else {
+                // 执行php -v的status应该总是success的
+                panic!("在查找PHP解释器时遇到未知错误");
+            }
+        }
+        Err(_) => {
+            warn!("无法找到PHP解释器。服务器将继续运行，但将无法处理PHP请求。");
+        }
+    };
 
     // 监听端口
     let port: u16 = config.port();
