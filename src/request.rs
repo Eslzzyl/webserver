@@ -23,7 +23,7 @@ impl Request {
         let request_string = match String::from_utf8(buffer.to_vec()) {
             Ok(string) => string,
             Err(_) => {
-                error!("[ID{}]Error when parsing request!", id);
+                error!("[ID{}]无法解析HTTP请求", id);
                 return Err(Exception::RequestIsNotUtf8);
             }
         };
@@ -38,9 +38,11 @@ impl Request {
         let method_str = first_line[0].to_uppercase();
         let method = match method_str.as_str() {
             "GET" => HttpRequestMethod::Get,
+            "HEAD" => HttpRequestMethod::Head,
+            "OPTIONS" => HttpRequestMethod::Options,
             "POST" => HttpRequestMethod::Post,
             _ => {
-                println!("Unsupported method!");
+                error!("[ID{}]不支持的HTTP请求方法：{}", id, &method_str);
                 return Err(Exception::UnSupportedRequestMethod);
             }
         };
@@ -50,7 +52,7 @@ impl Request {
             // 当前只支持1.1
             r"HTTP/1.1" => HttpVersion::V1_1,
             _ => {
-                println!("Unsupported HTTP version!");
+                error!("[ID{}]不支持的HTTP协议版本：{}", id, &version_str);
                 return Err(Exception::UnsupportedHttpVersion);
             }
         };

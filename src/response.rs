@@ -12,14 +12,14 @@ use flate2::{
     Compression,
 };
 use brotli::enc::{self, backward_references::BrotliEncoderParams};
-use log::{error, debug};
+use log::{error, warn, debug};
 
 use std::{
     io::{self, Read, Write},
     sync::{Arc, Mutex},
-    fs::{self, File},
+    fs::{self, File, metadata},
     ffi::OsStr,
-    path::{Path, PathBuf},
+    path::{Path, PathBuf}, os::unix::prelude::MetadataExt,
 };
 
 /// HTTP 响应
@@ -39,7 +39,7 @@ pub struct Response {
     status_code: u16,
     information: String,
     content_type: String,
-    content_length: usize,
+    content_length: u64,
     date: DateTime<Utc>,
     content_encoding: HttpEncoding,     // 响应仅指定一种压缩编码即可。若浏览器支持多种，则具体采用哪种由Config决定
     server_name: String,
@@ -81,7 +81,7 @@ impl Response {
     /// 
     /// ## 返回
     /// - 一个新的 Response 对象，不完整，还需要进一步处理才能发回浏览器
-    fn from_file(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>) -> Self {
+    fn from_file(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>, headonly: bool) -> Self {
         let mut response = Self::new();
         response.content_encoding = decide_encoding(&accept_encoding);
         match response.content_encoding {
@@ -98,31 +98,45 @@ impl Response {
                 debug!("[ID{}]缓存命中", id);
                 // 这里其实是有个潜在问题的。理论上不同客户端要求的encoding可能会不同，但是缓存却是共享的，导致encoding是相同的。
                 // 但是单客户端情况下可以忽略。而且目前所有主流浏览器也都支持gzip了。
-                response.content = bytes.clone();
+                response.content_length = bytes.len() as u64;
+                response.content = match headonly {
+                    // headonly时，填入一个空字符串，否则填入找到的bytes
+                    true => Bytes::from(Vec::<u8>::new()),
+                    false => bytes.clone(),
+                };
             },
             None => {
                 debug!("[ID{}]缓存未命中", id);
-                let mut file = match File::open(path) {
-                    Ok(f) => f,
-                    Err(e) => {
-                        error!("[ID{}]无法打开路径{}指定的文件。错误：{}", id, path, e);
-                        panic!();
-                    },
-                };
-                let mut contents = Vec::new();
-                match file.read_to_end(&mut contents) {
-                    Ok(_) => {},
-                    Err(e) => {
-                        error!("[ID{}]无法读取文件{}。错误：{}", id, path, e);
-                        panic!();
+                if headonly {
+                    // 如果headonly为true，则通过Metadata直接获取文件大小，而不是真的读取文件，从而提高性能
+                    let path = Path::new(path);
+                    let metadata = metadata(path).unwrap();
+                    response.content = Bytes::from(Vec::<u8>::new());
+                    response.content_length = metadata.size();
+                } else {
+                    // 如果为false，又缓存不命中，就只好读取文件
+                    let mut file = match File::open(path) {
+                        Ok(f) => f,
+                        Err(e) => {
+                            error!("[ID{}]无法打开路径{}指定的文件。错误：{}", id, path, e);
+                            panic!();
+                        },
+                    };
+                    let mut contents = Vec::new();
+                    match file.read_to_end(&mut contents) {
+                        Ok(_) => {},
+                        Err(e) => {
+                            error!("[ID{}]无法读取文件{}。错误：{}", id, path, e);
+                            panic!();
+                        }
                     }
+                    contents = compress(contents, response.content_encoding).unwrap();
+                    response.content_length = contents.len() as u64;
+                    response.content = Bytes::from(contents.clone());
+                    cache_lock.push(path, Bytes::from(contents));
                 }
-                contents = compress(contents, response.content_encoding).unwrap();
-                response.content = Bytes::from(contents.clone()); 
-                cache_lock.push(path, Bytes::from(contents));
             }
         }
-        response.content_length = response.content.len();
         response
     }
 
@@ -158,7 +172,7 @@ impl Response {
         }.build();
         let content_compressed = compress(content.into_bytes(), response.content_encoding).unwrap();
         response.content = Bytes::from(content_compressed);
-        response.content_length = response.content.len();
+        response.content_length = response.content.len() as u64;
         response.status_code = code;
         response
     }
@@ -173,7 +187,7 @@ impl Response {
     /// 
     /// ## 返回
     /// - 一个新的 Response 对象，不完整，还需要进一步处理才能发回浏览器
-    fn from_dir(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>) -> Self {
+    fn from_dir(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>, headonly: bool) -> Self {
         let mut response = Self::new();
         response.content_encoding = decide_encoding(&accept_encoding);
         match response.content_encoding {
@@ -190,7 +204,12 @@ impl Response {
                 debug!("[ID{}]缓存命中", id);
                 // 这里其实是有个潜在问题的。理论上不同客户端要求的encoding可能会不同，但是缓存却是共享的，导致encoding是相同的。
                 // 但是单客户端情况下可以忽略。而且目前所有主流浏览器也都支持gzip了。
-                response.content = bytes.clone();
+                response.content = match headonly {
+                    // headonly时，填入一个空字符串，否则填入找到的bytes
+                    true => Bytes::from(Vec::<u8>::new()),
+                    false => bytes.clone(),
+                };
+                response.content_length = bytes.len() as u64;
             },
             None => {   // 缓存未命中，生成目录列表
                 debug!("[ID{}]缓存未命中", id);
@@ -201,11 +220,17 @@ impl Response {
                 }
                 let content = HtmlBuilder::from_dir(path, &mut dir_vec).build();
                 let content_compressed = compress(content.into_bytes(), response.content_encoding).unwrap();
-                response.content = Bytes::from(content_compressed);
+                response.content_length = content_compressed.len() as u64;
+                // headonly时，填入一个空字符串，否则填入压缩好的content
+                response.content = Bytes::from(
+                    match headonly {
+                        true => {Vec::<u8>::new()},
+                        false => content_compressed,
+                    }
+                );
                 cache_lock.push(path, response.content.clone());
             }
         }
-        response.content_length = response.content.len();
         response
     }
 
@@ -220,7 +245,7 @@ impl Response {
     /// - 一个新的 Response 对象，不完整，还需要进一步处理才能发回浏览器
     /// 
     /// 本函数不涉及对文件缓存的访问，因为本函数被设计用来进行PHP的处理，而PHP往往是动态页面。
-    fn from_html(html: &str, accept_encoding: Vec<HttpEncoding>, id: u128) -> Response {
+    fn from_html(html: &str, accept_encoding: Vec<HttpEncoding>, id: u128, headonly: bool) -> Response {
         let mut response = Self::new();
         response.content_encoding = decide_encoding(&accept_encoding);
         match response.content_encoding {
@@ -230,8 +255,14 @@ impl Response {
             HttpEncoding::None => debug!("[ID{}]不进行压缩", id),
         };
         let content_compressed = compress(Vec::from(html), response.content_encoding).unwrap();
-        response.content = Bytes::from(content_compressed);
-        response.content_length = response.content.len();
+        response.content_length = content_compressed.len() as u64;
+        response.content = Bytes::from(
+            // headonly时，填入一个空字符串，否则填入压缩好的content
+            match headonly {
+                true => Vec::<u8>::new(),
+                false => content_compressed,
+            }
+        );
         response
     }
 
@@ -296,8 +327,10 @@ impl Response {
         let method = request.method();
         let metadata_result = fs::metadata(path);
 
-        // 当前仅支持GET方法，其他方法一律返回405
-        if method != HttpRequestMethod::Get {
+        // 仅有下列方法得到支持，其他方法一律返回405
+        if method != HttpRequestMethod::Get
+            && method != HttpRequestMethod::Head
+            && method != HttpRequestMethod::Options {
             return Self::from_status_code(405, accept_encoding, id)
                 .set_content_type("text/html;charset=utf-8")
                 .set_date()
@@ -306,10 +339,16 @@ impl Response {
                 .to_owned();
         }
 
+        // 若请求方法为HEAD，则设置headonly为true
+        let headonly = match method {
+            HttpRequestMethod::Head => true,
+            _ => false,
+        };
+
         match metadata_result {
             Ok(metadata) => {
                 if metadata.is_dir() {  // path是目录
-                    Self::from_dir(path, accept_encoding, id, cache)
+                    Self::from_dir(path, accept_encoding, id, cache, headonly)
                         .set_content_type("text/html;charset=utf-8")
                         .set_date()
                         .set_code(200)
@@ -333,7 +372,7 @@ impl Response {
                                 return Self::response_500(request, id);
                             }
                         };
-                        return Self::from_html(&html, accept_encoding, id)
+                        return Self::from_html(&html, accept_encoding, id, headonly)
                             .set_content_type("text/html;charset=utf-8")
                             .set_date()
                             .set_code(200)
@@ -342,7 +381,7 @@ impl Response {
                             .to_owned();
                     }
                     let mime = get_mime(extention);
-                    Self::from_file(path, accept_encoding, id, cache)
+                    Self::from_file(path, accept_encoding, id, cache, headonly)
                         .set_content_type(mime)
                         .set_date()
                         .set_code(200)
@@ -352,7 +391,7 @@ impl Response {
                 }
             }
             Err(_) => {
-                error!("[ID{}]无法获取{}的元数据，产生500 response", id, path);
+                warn!("[ID{}]无法获取{}的元数据，产生500 response", id, path);
                 Self::response_500(request, id)
             }
         }

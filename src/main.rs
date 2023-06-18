@@ -225,7 +225,8 @@ async fn handle_connection(stream: &mut TcpStream, id: u128, root: &str, cache: 
             let path_str = match path.to_str() {
                 Some(s) => s,
                 None => {
-                    error!("[ID{}]无法将路径{:?}转换为str", id, path);
+                    let path_str = path.to_str().unwrap();
+                    error!("[ID{}]无法将路径{}转换为str", id, path_str);
                     return;
                 },
             };

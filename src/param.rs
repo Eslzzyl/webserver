@@ -167,8 +167,10 @@ pub enum HttpVersion {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HttpRequestMethod {
-    Post,
     Get,
+    Head,
+    Options,
+    Post,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -193,6 +195,8 @@ impl fmt::Display for HttpRequestMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             HttpRequestMethod::Get => write!(f, "Get"),
+            HttpRequestMethod::Head => write!(f, "Head"),
+            HttpRequestMethod::Options => write!(f, "Options"),
             HttpRequestMethod::Post => write!(f, "Post"),
         }
     }
