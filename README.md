@@ -34,7 +34,8 @@
 
 - 基于 Tokio 实现 TCP 连接的异步处理
 - 手动解析 HTTP 请求，手动构造 HTTP 响应
-- 支持 HTTP GET 请求和 HTTP 1.1
+- 支持 HTTP 的 GET、HEAD 请求
+- 支持 HTTP 1.1
 - 支持 HTTP 压缩，支持的编码有 Brotli, Gzip, Deflate，但目前优先使用 Gzip（Br 太慢）
 - 通过 MIME 表支持常见的 Web 格式
 - 支持简单的命令行控制
@@ -154,6 +155,7 @@ sudo prlimit --pid [PID] --nofile=32768:32768
 ### 参考文献
 
 - 《HTTP权威指南》 David Gourley 等著(2002)，陈涓 等译（人民邮电出版社 2012年版）
+- https://developer.mozilla.org/zh-CN/docs/Web/HTTP
 - RFC 2616 Hypertext Transfer Protocol -- HTTP/1.1
 - RFC 7230-7235
 - RFC 9110
@@ -163,7 +165,6 @@ sudo prlimit --pid [PID] --nofile=32768:32768
 #### 功能添加和调整
 
 - ~实现LRU缓存：困难。因为不得不用`unsafe`，而`unsafe`结构在线程之间传递太可怕了。~
-- 支持`HEAD`方法（容易）：https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Methods/HEAD
 - 支持`OPTIONS`方法（尝试）：https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Methods/OPTIONS
 - 看一看PHP的安全性方面有没有能挖掘的地方
 
