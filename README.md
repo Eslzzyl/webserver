@@ -34,7 +34,7 @@
 
 - 基于 Tokio 实现 TCP 连接的异步处理
 - 手动解析 HTTP 请求，手动构造 HTTP 响应
-- 支持 HTTP 的 GET、HEAD 请求
+- 支持 HTTP 的 GET、HEAD 请求，部分地支持 OPTIONS 请求（不支持CORS的预检请求）
 - 支持 HTTP 1.1
 - 支持 HTTP 压缩，支持的编码有 Brotli, Gzip, Deflate，但目前优先使用 Gzip（Br 太慢）
 - 通过 MIME 表支持常见的 Web 格式
@@ -48,6 +48,26 @@
     - 表格排版，清晰易读
 - 状态码页面动态生成
 - 简单的PHP页面支持
+
+各种请求方法的测试：
+- GET：使用浏览器测试
+- HEAD
+    ```bash
+    eslzzyl:~$ curl --head 127.0.0.1:7878/ -i
+    HTTP/1.1 200 OK
+    Content-Length: 858
+    Date: Mon, 19 Jun 2023 09:38:16 +0000
+    Server: eslzzyl-webserver
+    ```
+- OPTIONS
+    ```bash
+    eslzzyl:~$ curl -X OPTIONS 127.0.0.1:7878 -i
+    HTTP/1.1 204 No Content
+    Content-Length: 0
+    Date: Mon, 19 Jun 2023 09:22:51 +0000
+    Server: eslzzyl-webserver
+    Allow: GET, HEAD, OPTIONS
+    ```
 
 ### 构建 / Build
 
@@ -165,7 +185,6 @@ sudo prlimit --pid [PID] --nofile=32768:32768
 #### 功能添加和调整
 
 - ~实现LRU缓存：困难。因为不得不用`unsafe`，而`unsafe`结构在线程之间传递太可怕了。~
-- 支持`OPTIONS`方法（尝试）：https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Methods/OPTIONS
 - 看一看PHP的安全性方面有没有能挖掘的地方
 
 找个机会精简一下依赖，目前依赖快100个，编译太慢了，很多依赖只是用到一个简单的功能，没必要用库。尤其是`Config`的读取那部分，`serde`的依赖有很多

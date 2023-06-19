@@ -9,6 +9,16 @@ pub const SERVER_NAME: &str = "eslzzyl-webserver";
 pub const CRLF: &str = "\r\n";
 
 lazy_static! {
+    pub static ref ALLOWED_METHODS: Vec<HttpRequestMethod> = {
+        vec![
+            HttpRequestMethod::Get,
+            HttpRequestMethod::Head,
+            HttpRequestMethod::Options,
+        ]
+    };
+}
+
+lazy_static! {
     pub static ref STATUS_CODES: HashMap<u16, &'static str> = {
         let mut map = HashMap::new();
         map.insert(100, "Continue");

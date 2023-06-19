@@ -56,17 +56,14 @@ impl Response {
     /// - HTTP版本：`1.1`
     /// - 状态码：200
     /// - 响应信息：`OK`
-    /// - Content-Type：`text/plain;charset=utf-8`
+    /// - Content-Type：None
     /// - Content-Length：`0`
     /// - Date：当前的UTC时间
     /// - Content-Encoding：明文（无压缩）
-    /// - Content：留空
+    /// - Server: `SERVER_NAME`
+    /// - Allow: GET、HEAD、OPTIONS
+    /// - Content：None
     pub fn new() -> Self {
-        let allow = vec![
-            HttpRequestMethod::Get,
-            HttpRequestMethod::Head,
-            HttpRequestMethod::Options,
-        ];
         Self {
             version: HttpVersion::V1_1,
             status_code: 200,
@@ -76,7 +73,7 @@ impl Response {
             date: Utc::now(),
             content_encoding: None,
             server_name: SERVER_NAME.to_string(),
-            allow: Some(allow),
+            allow: Some(ALLOWED_METHODS.to_vec()),
             content: None,
         }
     }
@@ -93,6 +90,7 @@ impl Response {
     /// - 一个新的 Response 对象，不完整，还需要进一步处理才能发回浏览器
     fn from_file(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>, headonly: bool, mime: &str) -> Self {
         let mut response = Self::new();
+        response.allow = None;
         response.content_encoding = match headonly {
             true => None,
             false => decide_encoding(&accept_encoding),
@@ -172,8 +170,11 @@ impl Response {
             response.content = None;
             response.content_encoding = None;
             response.content_type = None;
+            response.allow = Some(ALLOWED_METHODS.to_vec());
+            response.set_code(code);
             return response;
         }
+        response.allow = None;
         match response.content_encoding {
             Some(HttpEncoding::Gzip) => debug!("[ID{}]使用Gzip压缩编码", id),
             Some(HttpEncoding::Br) => debug!("[ID{}]使用Brotli压缩编码", id),
@@ -197,7 +198,7 @@ impl Response {
         response.content_length = bytes.len() as u64;
         response.content = Some(bytes);
         response.content_type = Some("text/html;charset=utf-8".to_string());
-        response.status_code = code;
+        response.set_code(code);
         response
     }
 
@@ -213,6 +214,7 @@ impl Response {
     /// - 一个新的 Response 对象，不完整，还需要进一步处理才能发回浏览器
     fn from_dir(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>, headonly: bool) -> Self {
         let mut response = Self::new();
+        response.allow = None;
         response.content_encoding = match headonly {
             true => None,
             false => decide_encoding(&accept_encoding),
@@ -227,6 +229,8 @@ impl Response {
         // 仅在有响应体时才设置content-type
         if !headonly {
             response.content_type = Some("text/html;charset=utf-8".to_string());
+        } else {
+            response.content_type = None;
         }
 
         // 查找缓存
@@ -256,9 +260,10 @@ impl Response {
                 // headonly时，填入一个空字符串，否则填入压缩好的content
                 response.content = match headonly {
                     true => None,
-                    false => Some(Bytes::from(content_compressed)),
+                    false => Some(Bytes::from(content_compressed.clone())),
                 };
-                cache_lock.push(path, response.content.clone().unwrap());
+                // 无论是否是HEAD请求，都要写缓存
+                cache_lock.push(path, Bytes::from(content_compressed));
             }
         }
         response
@@ -277,6 +282,7 @@ impl Response {
     /// 本函数不涉及对文件缓存的访问，因为本函数被设计用来进行PHP的处理，而PHP往往是动态页面。
     fn from_html(html: &str, accept_encoding: Vec<HttpEncoding>, id: u128, headonly: bool) -> Response {
         let mut response = Self::new();
+        response.allow = None;
         if headonly {
             response.content_encoding = None;
             response.content_type = None;
@@ -382,6 +388,7 @@ impl Response {
         // 对于OPTIONS方法的处理
         // OPTIONS允许指定明确的请求路径，或者请求*。服务器目前对所有的请求资源均使用相同的请求方法，因此无需特别处理路径问题。
         if method == HttpRequestMethod::Options {
+            debug!("[ID{}]请求方法为OPTIONS", id);
             return Self::from_status_code(204, accept_encoding, id)
                 .set_date()
                 .set_version()
@@ -391,13 +398,17 @@ impl Response {
 
         // 若请求方法为HEAD，则设置headonly为true
         let headonly = match method {
-            HttpRequestMethod::Head => true,
+            HttpRequestMethod::Head => {
+                debug!("[ID{}]请求方法为HEAD", id);
+                true
+            },
             _ => false,
         };
 
         match metadata_result {
             Ok(metadata) => {
                 if metadata.is_dir() {  // path是目录
+                    debug!("[ID{}]请求的路径是目录", id);
                     Self::from_dir(path, accept_encoding, id, cache, headonly)
                         .set_date()
                         .set_code(200)
@@ -405,6 +416,7 @@ impl Response {
                         .set_server_name()
                         .to_owned()
                 } else {    // path是文件
+                    debug!("[ID{}]请求的路径是文件", id);
                     let extention = match Path::new(path).extension() {
                         Some(e) => e,
                         None => {
@@ -414,6 +426,7 @@ impl Response {
                     };
                     // 特殊情况：文件扩展名是PHP
                     if extention == "php" {
+                        debug!("[ID{}]请求的文件是PHP，启用PHP处理", id);
                         let html = match handle_php(path, id) {
                             Ok(html) => html,
                             Err(e) => {
@@ -434,7 +447,7 @@ impl Response {
                         .set_code(200)
                         .set_version()
                         .set_server_name()
-                        .clone()
+                        .to_owned()
                 }
             }
             Err(_) => {
@@ -462,7 +475,7 @@ impl Response {
         let server: &str = &self.server_name;
 
         // 拼接响应
-        [
+        let header = [
             version, " ", status_code, " ", information, CRLF,
             // 选择性地填入content_type
             match &self.content_type {
@@ -474,14 +487,18 @@ impl Response {
             // 选择性地填入content_encoding
             match self.content_encoding {
                 Some(e) => {
-                    match e {
-                        HttpEncoding::Gzip => "gzip",
-                        HttpEncoding::Deflate => "deflate",
-                        HttpEncoding::Br => "br",
-                    }
+                    [
+                        "Content-encoding: ",
+                        match e {
+                            HttpEncoding::Gzip => "gzip",
+                            HttpEncoding::Deflate => "deflate",
+                            HttpEncoding::Br => "br",
+                        },
+                        CRLF,
+                    ].concat().to_string()
                 },
-                None => "",
-            },
+                None => "".to_string(),
+            }.as_str(),
             "Content-Length: ", content_length, CRLF,
             "Date: ", date, CRLF,
             "Server: ", server, CRLF,
@@ -496,17 +513,21 @@ impl Response {
                             allow_str.push_str(", ");
                         }
                     }
-                    allow_str
+                    ["Allow: ", &allow_str, CRLF].concat()
                 },
                 None => "".to_string(),
             }.as_str(),
             CRLF,   // 分隔响应头和响应体的空行
+        ].concat();
+        // 然后拼接响应体，注意响应体可能有压缩，因此需要以Vec<u8>格式拼接，而不是上面的String。
+        [
+            header.as_bytes(),
             // 选择性地填入响应体
             match &self.content {
-                Some(c) => str::from_utf8(&c).expect("Invalid UTF-8"),
-                None => "",
+                Some(c) => &c,
+                None => b"",
             },
-        ].concat().into()
+        ].concat()
     }
 }
 

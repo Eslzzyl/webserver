@@ -218,7 +218,6 @@ async fn handle_connection(stream: &mut TcpStream, id: u128, root: &str, cache: 
     let result = route(&request.path(), id, root).await;
     debug!("[ID{}]HTTP路由解析完毕", id);
 
-
     // 如果path不存在，就返回404。使用Response::response_404
     let response = match result {
         Ok(path) => {
