@@ -19,7 +19,9 @@ use std::{
     sync::{Arc, Mutex},
     fs::{self, File, metadata},
     ffi::OsStr,
-    path::{Path, PathBuf}, os::unix::prelude::MetadataExt,
+    path::{Path, PathBuf},
+    os::unix::prelude::MetadataExt,
+    str,
 };
 
 /// HTTP 响应
@@ -32,18 +34,20 @@ use std::{
 /// - `date`: 发送响应时的时间
 /// - `content_encoding`: 指定响应体应当以何种算法进行压缩
 /// - `server_name`: 服务器名
+/// - `allow`: 服务器允许的HTTP请求方法
 /// - `content`: 响应体本身
 #[derive(Debug, Clone)]
 pub struct Response {
     version: HttpVersion,
     status_code: u16,
     information: String,
-    content_type: String,
+    content_type: Option<String>,
     content_length: u64,
     date: DateTime<Utc>,
-    content_encoding: HttpEncoding,     // 响应仅指定一种压缩编码即可。若浏览器支持多种，则具体采用哪种由Config决定
+    content_encoding: Option<HttpEncoding>,
     server_name: String,
-    content: Bytes,
+    allow: Option<Vec<HttpRequestMethod>>,
+    content: Option<Bytes>,
 }
 
 impl Response {
@@ -58,16 +62,22 @@ impl Response {
     /// - Content-Encoding：明文（无压缩）
     /// - Content：留空
     pub fn new() -> Self {
+        let allow = vec![
+            HttpRequestMethod::Get,
+            HttpRequestMethod::Head,
+            HttpRequestMethod::Options,
+        ];
         Self {
             version: HttpVersion::V1_1,
             status_code: 200,
             information: "OK".to_string(),
-            content_type: "text/plain;charset=utf-8".to_string(),
+            content_type: None,
             content_length: 0,
             date: Utc::now(),
-            content_encoding: HttpEncoding::None,
+            content_encoding: None,
             server_name: SERVER_NAME.to_string(),
-            content: Bytes::new(),
+            allow: Some(allow),
+            content: None,
         }
     }
 
@@ -81,14 +91,17 @@ impl Response {
     /// 
     /// ## 返回
     /// - 一个新的 Response 对象，不完整，还需要进一步处理才能发回浏览器
-    fn from_file(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>, headonly: bool) -> Self {
+    fn from_file(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>, headonly: bool, mime: &str) -> Self {
         let mut response = Self::new();
-        response.content_encoding = decide_encoding(&accept_encoding);
+        response.content_encoding = match headonly {
+            true => None,
+            false => decide_encoding(&accept_encoding),
+        };
         match response.content_encoding {
-            HttpEncoding::Gzip => debug!("[ID{}]使用Gzip压缩编码", id),
-            HttpEncoding::Br => debug!("[ID{}]使用Brotli压缩编码", id),
-            HttpEncoding::Deflate => debug!("[ID{}]使用Deflate压缩编码", id),
-            HttpEncoding::None => debug!("[ID{}]不进行压缩", id),
+            Some(HttpEncoding::Gzip) => debug!("[ID{}]使用Gzip压缩编码", id),
+            Some(HttpEncoding::Br) => debug!("[ID{}]使用Brotli压缩编码", id),
+            Some(HttpEncoding::Deflate) => debug!("[ID{}]使用Deflate压缩编码", id),
+            None => debug!("[ID{}]不进行压缩", id),
         };
         
         // 查找缓存
@@ -100,9 +113,9 @@ impl Response {
                 // 但是单客户端情况下可以忽略。而且目前所有主流浏览器也都支持gzip了。
                 response.content_length = bytes.len() as u64;
                 response.content = match headonly {
-                    // headonly时，填入一个空字符串，否则填入找到的bytes
-                    true => Bytes::from(Vec::<u8>::new()),
-                    false => bytes.clone(),
+                    // headonly时，不填入content（但正常设置length），否则填入找到的bytes
+                    true => None,
+                    false => Some(bytes.clone()),
                 };
             },
             None => {
@@ -111,7 +124,8 @@ impl Response {
                     // 如果headonly为true，则通过Metadata直接获取文件大小，而不是真的读取文件，从而提高性能
                     let path = Path::new(path);
                     let metadata = metadata(path).unwrap();
-                    response.content = Bytes::from(Vec::<u8>::new());
+                    response.content_type = None;
+                    response.content = None;
                     response.content_length = metadata.size();
                 } else {
                     // 如果为false，又缓存不命中，就只好读取文件
@@ -132,7 +146,8 @@ impl Response {
                     }
                     contents = compress(contents, response.content_encoding).unwrap();
                     response.content_length = contents.len() as u64;
-                    response.content = Bytes::from(contents.clone());
+                    response.content_type = Some(mime.to_string());
+                    response.content = Some(Bytes::from(contents.clone()));
                     cache_lock.push(path, Bytes::from(contents));
                 }
             }
@@ -152,11 +167,18 @@ impl Response {
     fn from_status_code(code: u16, accept_encoding: Vec<HttpEncoding>, id: u128) -> Self {
         let mut response = Self::new();
         response.content_encoding = decide_encoding(&accept_encoding);
+        // 204响应不包含响应体，因此encoding和type也不需要
+        if code == 204 {
+            response.content = None;
+            response.content_encoding = None;
+            response.content_type = None;
+            return response;
+        }
         match response.content_encoding {
-            HttpEncoding::Gzip => debug!("[ID{}]使用Gzip压缩编码", id),
-            HttpEncoding::Br => debug!("[ID{}]使用Brotli压缩编码", id),
-            HttpEncoding::Deflate => debug!("[ID{}]使用Deflate压缩编码", id),
-            HttpEncoding::None => debug!("[ID{}]不进行压缩", id),
+            Some(HttpEncoding::Gzip) => debug!("[ID{}]使用Gzip压缩编码", id),
+            Some(HttpEncoding::Br) => debug!("[ID{}]使用Brotli压缩编码", id),
+            Some(HttpEncoding::Deflate) => debug!("[ID{}]使用Deflate压缩编码", id),
+            None => debug!("[ID{}]不进行压缩", id),
         };
         let content = match code {
             404 => HtmlBuilder::from_status_code(404, Some(
@@ -171,8 +193,10 @@ impl Response {
             _ => HtmlBuilder::from_status_code(code, None),
         }.build();
         let content_compressed = compress(content.into_bytes(), response.content_encoding).unwrap();
-        response.content = Bytes::from(content_compressed);
-        response.content_length = response.content.len() as u64;
+        let bytes = Bytes::from(content_compressed);
+        response.content_length = bytes.len() as u64;
+        response.content = Some(bytes);
+        response.content_type = Some("text/html;charset=utf-8".to_string());
         response.status_code = code;
         response
     }
@@ -189,13 +213,21 @@ impl Response {
     /// - 一个新的 Response 对象，不完整，还需要进一步处理才能发回浏览器
     fn from_dir(path: &str, accept_encoding: Vec<HttpEncoding>, id: u128, cache: &Arc<Mutex<FileCache>>, headonly: bool) -> Self {
         let mut response = Self::new();
-        response.content_encoding = decide_encoding(&accept_encoding);
-        match response.content_encoding {
-            HttpEncoding::Gzip => debug!("[ID{}]使用Gzip压缩编码", id),
-            HttpEncoding::Br => debug!("[ID{}]使用Brotli压缩编码", id),
-            HttpEncoding::Deflate => debug!("[ID{}]使用Deflate压缩编码", id),
-            HttpEncoding::None => debug!("[ID{}]不进行压缩", id),
+        response.content_encoding = match headonly {
+            true => None,
+            false => decide_encoding(&accept_encoding),
         };
+        match response.content_encoding {
+            Some(HttpEncoding::Gzip) => debug!("[ID{}]使用Gzip压缩编码", id),
+            Some(HttpEncoding::Br) => debug!("[ID{}]使用Brotli压缩编码", id),
+            Some(HttpEncoding::Deflate) => debug!("[ID{}]使用Deflate压缩编码", id),
+            None => debug!("[ID{}]不进行压缩", id),
+        };
+
+        // 仅在有响应体时才设置content-type
+        if !headonly {
+            response.content_type = Some("text/html;charset=utf-8".to_string());
+        }
 
         // 查找缓存
         let mut cache_lock = cache.lock().unwrap();
@@ -206,8 +238,8 @@ impl Response {
                 // 但是单客户端情况下可以忽略。而且目前所有主流浏览器也都支持gzip了。
                 response.content = match headonly {
                     // headonly时，填入一个空字符串，否则填入找到的bytes
-                    true => Bytes::from(Vec::<u8>::new()),
-                    false => bytes.clone(),
+                    true => None,
+                    false => Some(bytes.clone()),
                 };
                 response.content_length = bytes.len() as u64;
             },
@@ -222,13 +254,11 @@ impl Response {
                 let content_compressed = compress(content.into_bytes(), response.content_encoding).unwrap();
                 response.content_length = content_compressed.len() as u64;
                 // headonly时，填入一个空字符串，否则填入压缩好的content
-                response.content = Bytes::from(
-                    match headonly {
-                        true => {Vec::<u8>::new()},
-                        false => content_compressed,
-                    }
-                );
-                cache_lock.push(path, response.content.clone());
+                response.content = match headonly {
+                    true => None,
+                    false => Some(Bytes::from(content_compressed)),
+                };
+                cache_lock.push(path, response.content.clone().unwrap());
             }
         }
         response
@@ -247,34 +277,29 @@ impl Response {
     /// 本函数不涉及对文件缓存的访问，因为本函数被设计用来进行PHP的处理，而PHP往往是动态页面。
     fn from_html(html: &str, accept_encoding: Vec<HttpEncoding>, id: u128, headonly: bool) -> Response {
         let mut response = Self::new();
+        if headonly {
+            response.content_encoding = None;
+            response.content_type = None;
+            response.content = None;
+            return response;
+        }
         response.content_encoding = decide_encoding(&accept_encoding);
         match response.content_encoding {
-            HttpEncoding::Gzip => debug!("[ID{}]使用Gzip压缩编码", id),
-            HttpEncoding::Br => debug!("[ID{}]使用Brotli压缩编码", id),
-            HttpEncoding::Deflate => debug!("[ID{}]使用Deflate压缩编码", id),
-            HttpEncoding::None => debug!("[ID{}]不进行压缩", id),
+            Some(HttpEncoding::Gzip) => debug!("[ID{}]使用Gzip压缩编码", id),
+            Some(HttpEncoding::Br) => debug!("[ID{}]使用Brotli压缩编码", id),
+            Some(HttpEncoding::Deflate) => debug!("[ID{}]使用Deflate压缩编码", id),
+            None => debug!("[ID{}]不进行压缩", id),
         };
         let content_compressed = compress(Vec::from(html), response.content_encoding).unwrap();
         response.content_length = content_compressed.len() as u64;
-        response.content = Bytes::from(
-            // headonly时，填入一个空字符串，否则填入压缩好的content
-            match headonly {
-                true => Vec::<u8>::new(),
-                false => content_compressed,
-            }
-        );
+        response.content_type = Some("text/html;charset=utf-8".to_string());
+        response.content = Some(Bytes::from(content_compressed));
         response
     }
 
     /// 设定时间为当前时刻
     fn set_date(&mut self) -> &mut Self {
         self.date = Utc::now();
-        self
-    }
-
-    /// 设置content_type即mime
-    fn set_content_type(&mut self, mime: &str) -> &mut Self {
-        self.content_type = mime.to_string();
         self
     }
 
@@ -290,11 +315,28 @@ impl Response {
         self
     }
 
+    /// 本函数根据传入的`code`参数设置`self`对象的状态码字段和HTTP信息字段。状态码和信息是一一对应的。
+    /// 
+    /// 现行HTTP协议的状态码由[RFC9110#15](https://www.rfc-editor.org/rfc/rfc9110#section-15)规定。
+    /// 
+    /// ## 参数：
+    /// - `code`: 状态码。实际上HTTP状态码最大的也就是500多，因此采用`u16`
+    fn set_code(&mut self, code: u16) -> &mut Self {
+        self.status_code = code;
+        self.information = match STATUS_CODES.get(&code) {
+            Some(&debug) => debug.to_string(),
+            None => {
+                error!("非法的状态码：{}。这条错误说明代码编写出现了错误。", code);
+                panic!();
+            }
+        };
+        self
+    }
+
     /// 预设的404 Response
     pub fn response_404(request: &Request, id: u128) -> Self {
         let accept_encoding = request.accept_encoding().to_vec();
         Self::from_status_code(404, accept_encoding, id)
-            .set_content_type("text/html;charset=utf-8")
             .set_date()
             .set_code(404)
             .set_version()
@@ -305,7 +347,6 @@ impl Response {
     pub fn response_500(request: &Request, id: u128) -> Self {
         let accept_encoding = request.accept_encoding().to_vec();
         Self::from_status_code(500, accept_encoding, id)
-            .set_content_type("text/html;charset=utf-8")
             .set_date()
             .set_code(500)
             .set_version()
@@ -332,7 +373,16 @@ impl Response {
             && method != HttpRequestMethod::Head
             && method != HttpRequestMethod::Options {
             return Self::from_status_code(405, accept_encoding, id)
-                .set_content_type("text/html;charset=utf-8")
+                .set_date()
+                .set_version()
+                .set_server_name()
+                .to_owned();
+        }
+
+        // 对于OPTIONS方法的处理
+        // OPTIONS允许指定明确的请求路径，或者请求*。服务器目前对所有的请求资源均使用相同的请求方法，因此无需特别处理路径问题。
+        if method == HttpRequestMethod::Options {
+            return Self::from_status_code(204, accept_encoding, id)
                 .set_date()
                 .set_version()
                 .set_server_name()
@@ -349,7 +399,6 @@ impl Response {
             Ok(metadata) => {
                 if metadata.is_dir() {  // path是目录
                     Self::from_dir(path, accept_encoding, id, cache, headonly)
-                        .set_content_type("text/html;charset=utf-8")
                         .set_date()
                         .set_code(200)
                         .set_version()
@@ -373,7 +422,6 @@ impl Response {
                             }
                         };
                         return Self::from_html(&html, accept_encoding, id, headonly)
-                            .set_content_type("text/html;charset=utf-8")
                             .set_date()
                             .set_code(200)
                             .set_version()
@@ -381,8 +429,7 @@ impl Response {
                             .to_owned();
                     }
                     let mime = get_mime(extention);
-                    Self::from_file(path, accept_encoding, id, cache, headonly)
-                        .set_content_type(mime)
+                    Self::from_file(path, accept_encoding, id, cache, headonly, mime)
                         .set_date()
                         .set_code(200)
                         .set_version()
@@ -399,76 +446,77 @@ impl Response {
 
     /// 将一个 `Response` 对象转换为字节流
     pub fn as_bytes(&self) -> Vec<u8> {
+        // 如果content字段是None，那么content-type和content-encoding也必须是None
+        if self.content == None {
+            assert_eq!(self.content_encoding, None);
+            assert_eq!(self.content_type, None);
+        }
         // 获取各字段的&str
         let version: &str = match self.version {
             HttpVersion::V1_1 => "HTTP/1.1",
         };
         let status_code: &str = &self.status_code.to_string();
         let information: &str = &self.information;
-        let content_type: &str = &self.content_type;
         let content_length: &str = &self.content_length.to_string();
         let date: &str = &format_date(&self.date);
-        let content_encoding: &str = &match self.content_encoding {
-            HttpEncoding::Gzip => "gzip",
-            HttpEncoding::Deflate => "deflate",
-            HttpEncoding::Br => "br",
-            HttpEncoding::None => "",   // 实际上这一条是用不到的，后面还会特别检测是不是None。如果是，就直接略去content-encoding字段了。
-        }.to_string();
+        let server: &str = &self.server_name;
 
-        // 拼接响应头
-        let binding = [
+        // 拼接响应
+        [
             version, " ", status_code, " ", information, CRLF,
-            "Content-Type: ", content_type, CRLF,
+            // 选择性地填入content_type
+            match &self.content_type {
+                Some(t) => {
+                    ["Content-Type: ", &t, CRLF].concat()
+                },
+                None => "".to_string(),
+            }.as_str(),
+            // 选择性地填入content_encoding
+            match self.content_encoding {
+                Some(e) => {
+                    match e {
+                        HttpEncoding::Gzip => "gzip",
+                        HttpEncoding::Deflate => "deflate",
+                        HttpEncoding::Br => "br",
+                    }
+                },
+                None => "",
+            },
             "Content-Length: ", content_length, CRLF,
             "Date: ", date, CRLF,
-        ].concat();
-        // 不要把下面这行的as_str移动到上面那行，否则会有生命周期问题
-        let binding = binding.as_str();
-        // 如果 self.content_encoding 是None，就直接跳过这个字段，否则才进行编码
-        let binding = if self.content_encoding != HttpEncoding::None {
-            [
-                // 注意：首部总是以一个空行（仅包含一个CRLF）结束，即使没有主体部分也是如此。
-                binding,
-                "Content-Encoding: ", content_encoding, CRLF,
-                CRLF,
-            ].concat()
-        } else {
-            [
-                binding,
-                CRLF,
-            ].concat()
-        };
-        // 拼接响应体
-        [binding.as_bytes(), &self.content].concat()
+            "Server: ", server, CRLF,
+            // 选择性地填入allow
+            match &self.allow {
+                Some(a) => {
+                    let mut allow_str = String::new();
+                    for (index, method) in a.iter().enumerate() {
+                        allow_str.push_str(&format!("{}", method));
+                        // 如果后面还有，就加一个逗号分隔
+                        if index < a.len() - 1 {
+                            allow_str.push_str(", ");
+                        }
+                    }
+                    allow_str
+                },
+                None => "".to_string(),
+            }.as_str(),
+            CRLF,   // 分隔响应头和响应体的空行
+            // 选择性地填入响应体
+            match &self.content {
+                Some(c) => str::from_utf8(&c).expect("Invalid UTF-8"),
+                None => "",
+            },
+        ].concat().into()
     }
+}
 
+impl Response {
     pub fn status_code(&self) -> u16 {
         self.status_code
     }
 
     pub fn information(&self) -> &str {
         &self.information
-    }
-}
-
-
-impl Response {
-    /// 本函数根据传入的`code`参数设置`self`对象的状态码字段和HTTP信息字段。状态码和信息是一一对应的。
-    /// 
-    /// 现行HTTP协议的状态码由[RFC9110#15](https://www.rfc-editor.org/rfc/rfc9110#section-15)规定。
-    /// 
-    /// ## 参数：
-    /// - `code`: 状态码。实际上HTTP状态码最大的也就是500多，因此采用`u16`
-    fn set_code(&mut self, code: u16) -> &mut Self {
-        self.status_code = code;
-        self.information = match STATUS_CODES.get(&code) {
-            Some(&debug) => debug.to_string(),
-            None => {
-                error!("非法的状态码：{}。这条错误说明代码编写出现了错误。", code);
-                panic!();
-            }
-        };
-        self
     }
 }
 
@@ -485,25 +533,25 @@ fn format_date(date: &DateTime<Utc>) -> String {
 /// 
 /// ## 返回：
 /// - 压缩后的响应体数据，以字节流形式给出
-fn compress(data: Vec<u8>, mode: HttpEncoding) -> io::Result<Vec<u8>> {
+fn compress(data: Vec<u8>, mode: Option<HttpEncoding>) -> io::Result<Vec<u8>> {
     match mode {
-        HttpEncoding::Gzip => {
+        Some(HttpEncoding::Gzip) => {
             let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
             encoder.write_all(&data)?;
             encoder.finish()
         },
-        HttpEncoding::Deflate => {
+        Some(HttpEncoding::Deflate) => {
             let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
             encoder.write_all(&data)?;
             encoder.finish()
         },
-        HttpEncoding::Br => {
+        Some(HttpEncoding::Br) => {
             let params = BrotliEncoderParams::default();
             let mut output = Vec::new();
             enc::BrotliCompress(&mut io::Cursor::new(data), &mut output, &params)?;
             Ok(output)
         },
-        HttpEncoding::None => {
+        None => {
             // 无压缩方式，直接返回原文
             Ok(data)
         }
@@ -517,13 +565,13 @@ fn compress(data: Vec<u8>, mode: HttpEncoding) -> io::Result<Vec<u8>> {
 /// 4. 再否则，就只好不压缩了。
 /// 
 /// 实测Brotli太慢，因此优先用Gzip。考虑后期换一个brotli库。
-fn decide_encoding(accept_encoding: &Vec<HttpEncoding>) -> HttpEncoding {
+fn decide_encoding(accept_encoding: &Vec<HttpEncoding>) -> Option<HttpEncoding> {
     if accept_encoding.contains(&HttpEncoding::Gzip) {
-        HttpEncoding::Gzip
+        Some(HttpEncoding::Gzip)
     } else if accept_encoding.contains(&HttpEncoding::Deflate) {
-        HttpEncoding::Deflate
+        Some(HttpEncoding::Deflate)
     } else {
-        HttpEncoding::None
+        None
     }
 }
 

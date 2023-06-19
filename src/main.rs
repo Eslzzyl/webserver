@@ -275,7 +275,11 @@ async fn route(path: &str, id: u128, root: &str) -> Result<PathBuf, Exception> {
     if path == "/" {
         debug!("[ID{}]请求路径为根目录，返回index", id);
         let path = PathBuf::from(HTML_INDEX);
-        return Ok(path)
+        return Ok(path);
+    } else if path == "*" {     // 常见于OPTIONS方法
+        debug!("[ID{}]请求路径为*", id);
+        let path = PathBuf::from("*");
+        return Ok(path);
     }
     let mut path_str = path.to_string();
     path_str.remove(0);

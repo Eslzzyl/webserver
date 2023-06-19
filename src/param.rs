@@ -178,7 +178,6 @@ pub enum HttpEncoding {
     Gzip,
     Deflate,
     Br,
-    None,
 }
 
 use std::fmt;
@@ -194,10 +193,10 @@ impl fmt::Display for HttpVersion {
 impl fmt::Display for HttpRequestMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            HttpRequestMethod::Get => write!(f, "Get"),
-            HttpRequestMethod::Head => write!(f, "Head"),
-            HttpRequestMethod::Options => write!(f, "Options"),
-            HttpRequestMethod::Post => write!(f, "Post"),
+            HttpRequestMethod::Get => write!(f, "GET"),
+            HttpRequestMethod::Head => write!(f, "HEAD"),
+            HttpRequestMethod::Options => write!(f, "OPTIONS"),
+            HttpRequestMethod::Post => write!(f, "POST"),
         }
     }
 }
@@ -208,7 +207,6 @@ impl fmt::Display for HttpEncoding {
             HttpEncoding::Gzip => write!(f, "gzip"),
             HttpEncoding::Deflate => write!(f, "deflate"),
             HttpEncoding::Br => write!(f, "br"),
-            HttpEncoding::None => write!(f, "None"),
         }
     }
 }

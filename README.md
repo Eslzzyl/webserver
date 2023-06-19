@@ -158,7 +158,7 @@ sudo prlimit --pid [PID] --nofile=32768:32768
 - https://developer.mozilla.org/zh-CN/docs/Web/HTTP
 - RFC 2616 Hypertext Transfer Protocol -- HTTP/1.1
 - RFC 7230-7235
-- RFC 9110
+- [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.htm)
 
 ### 开发
 

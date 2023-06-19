@@ -28,8 +28,6 @@ impl Request {
             }
         };
 
-        // GET只有请求头，POST还有请求体，当前只考虑GET
-
         // 以CRLF为边界分割字符串
         let request_lines: Vec<&str> = request_string.split(CRLF).collect();
 
