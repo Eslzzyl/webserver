@@ -26,6 +26,7 @@
             // 获取当前日期和时间
             $currentDateTime = date('Y-m-d H:i:s');
             echo "<p>当前日期和时间：$currentDateTime</p>";
+            phpinfo();  // 写在报告里
             
             // 计算两个数字的和
             $num1 = 10;
