@@ -30,27 +30,29 @@
 > 2. 如何对其进行测试，还有哪些可以完善的功能？
 > 3. 有什么办法可以提高它的性能？
 
+本设计已在课程设计验收中获评“优秀”。
+
 ## 功能 / Features
 
-- 基于 Tokio 实现 TCP 连接的异步处理
+- 基于 [Tokio](https://tokio.rs/) 实现 TCP 连接的异步并发处理
 - 手动解析 HTTP 请求，手动构造 HTTP 响应
 - 支持 HTTP 的 GET、HEAD 请求，部分地支持 OPTIONS 请求（不支持CORS的预检请求）
 - 支持 HTTP 1.1
 - 支持 HTTP 压缩，支持的编码有 Brotli, Gzip, Deflate，但目前优先使用 Gzip（Br 太慢）
 - 通过 MIME 表支持常见的 Web 格式
 - 支持简单的命令行控制
-- 支持通过配置文件自定义 www root 文件夹和监听端口
-- 通过`log4rs`支持简单的日志系统，支持记录到文件或标准输出
-- 通过一个FIFO的文件缓存减少磁盘IO的次数
-- 支持文件列表模式
+- 支持通过配置文件修改服务器参数
+- 通过 [log4rs](https://github.com/estk/log4rs) 支持简单的日志系统，支持记录到文件或标准输出
+- 通过一个 FIFO 的文件缓存减少磁盘 I/O 的次数
+- 支持文件列表模式（课程设计加分点）
     - 支持超链接跳转
     - 文件列表自动排序
     - 表格排版，清晰易读
 - 状态码页面动态生成
-- 简单的PHP页面支持
+- 简单的 PHP 页面支持（课程设计主要加分点）
 
 各种请求方法的测试：
-- GET：使用浏览器测试
+- GET：使用浏览器测试即可
 - HEAD
     ```bash
     eslzzyl:~$ curl --head 127.0.0.1:7878/ -i
@@ -93,7 +95,7 @@ cargo build
     cargo run
     ```
 
-测试服务器默认在`127.0.0.1`监听，默认的端口是`7878`，但可以在`files/config.toml`中更改。
+测试服务器默认在`127.0.0.1`监听，默认的端口是`7878`，但可以在配置文件`files/config.toml`中更改。
 
 如果要在云服务器上运行：
 - 将`files/config.toml`中的`local`项改为`false`
@@ -101,6 +103,10 @@ cargo build
 - 这个玩具服务器**很不安全**，特别是PHP支持的部分，没有任何安全防护措施。一定不要让它在公网环境长期运行。
 
 程序启动后，打开浏览器，访问`127.0.0.1:7878`。如果运行在公网，则将IP替换为对应的公网IP。
+
+默认的Web根文件夹是`./files/html/`，但是可以在配置文件中修改。
+- 浏览器尝试请求`/`时，服务器将返回根文件夹下的`index.html`。
+- 浏览器尝试请求文件夹时，服务器将返回该文件夹下的文件列表。
 
 程序只在Linux平台测试过，但理论上是跨平台的。
 
@@ -176,9 +182,12 @@ sudo prlimit --pid [PID] --nofile=32768:32768
 
 - 《HTTP权威指南》 David Gourley 等著(2002)，陈涓 等译（人民邮电出版社 2012年版）
 - https://developer.mozilla.org/zh-CN/docs/Web/HTTP
-- RFC 2616 Hypertext Transfer Protocol -- HTTP/1.1
-- RFC 7230-7235
-- [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.htm)
+- [RFC 2616 Hypertext Transfer Protocol -- HTTP/1.1](https://www.rfc-editor.org/rfc/rfc2616)
+- RFC [7230](https://www.rfc-editor.org/rfc/rfc7230) - [7235](https://www.rfc-editor.org/rfc/rfc7235)
+- [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.htm) 即现行的 HTTP Specification
+- [Tokio 学习笔记](https://skyao.io/learning-tokio/)
+
+特别鸣谢：[ChatGPT](http://chat.openai.com/)，在本项目的编写过程中提供了极大的帮助。
 
 ### 开发
 
@@ -188,6 +197,11 @@ sudo prlimit --pid [PID] --nofile=32768:32768
 - 看一看PHP的安全性方面有没有能挖掘的地方
 
 找个机会精简一下依赖，目前依赖快100个，编译太慢了，很多依赖只是用到一个简单的功能，没必要用库。尤其是`Config`的读取那部分，`serde`的依赖有很多
+
+#### 待修复的问题
+
+- `route`找不到`index.html`时，应当返回根路径，以便`Response`列出根文件夹下的文件列表。目前是默认`index.html`一定存在了，会panic。
+- 文件缓存应当同时保存文件的修改时间，再次请求同一缓存块时比对时间，如果修改时间发生了变化，说明文件在缓存期间发生了变化，此时不应该返回缓存中的结果，而是应该重新读取文件。文件列表模式可以存储文件夹的修改时间。
 
 #### 注意事项
 
