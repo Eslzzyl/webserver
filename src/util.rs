@@ -254,3 +254,16 @@ pub fn handle_php(path: &str, id: u128) -> Result<String, Exception> {
         Err(Exception::PHPCodeError)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::util::format_file_size;
+
+    #[test]
+    fn test_file_size() {
+        let a = 9926;
+        let b = 51800;
+        assert_eq!(format_file_size(a), "9.7 KB".to_string());
+        assert_eq!(format_file_size(b), "50.6 KB".to_string());
+    }
+}
