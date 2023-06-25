@@ -112,6 +112,8 @@ cargo build
 
 ### 性能测试 / Benchmark
 
+目前的性能测试结果都是在无优化的 Debug 模式下得出的。
+
 可能我代码有点问题，在高并发时会一次性打开大量socket连接，占用很多socket file discriptor，一旦超过操作系统设定的`nlimit`限制（默认为1024），就会panic。
 
 #### 暂时提升`nlimit`限制

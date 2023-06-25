@@ -1,7 +1,15 @@
 [package]
 name = "webserver"
 version = "0.1.0"
+authors = ["Eslzzyl <eslzzyl@163.com>"]
 edition = "2021"
+description = "A toy webserver based on Rust"
+repository = "https://github.com/Eslzzyl/webserver"
+license = "MIT"
+publish = false     # 这个程序过于简陋，不应被发布到crates.io
+
+[profile.release]
+lto = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
