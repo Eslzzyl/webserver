@@ -32,6 +32,8 @@
 
 本设计已在课程设计验收中获评“优秀”。
 
+课程设计报告可以在 [此处](https://eslzzyl.lanzoum.com/iJquZ10ksheb) 下载。
+
 ## 功能 / Features
 
 - 基于 [Tokio](https://tokio.rs/) 实现 TCP 连接的异步并发处理
@@ -193,6 +195,8 @@ sudo prlimit --pid [PID] --nofile=32768:32768
 
 ### 开发
 
+由于课程设计已经结束，因此这里记录的一些内容可能不会很快实现/修复。
+
 #### 功能添加和调整
 
 - ~实现LRU缓存：困难。因为不得不用`unsafe`，而`unsafe`结构在线程之间传递太可怕了。~
@@ -204,19 +208,12 @@ sudo prlimit --pid [PID] --nofile=32768:32768
 
 - `route`找不到`index.html`时，应当返回根路径，以便`Response`列出根文件夹下的文件列表。目前是默认`index.html`一定存在了，会panic。
 - 文件缓存应当同时保存文件的修改时间，再次请求同一缓存块时比对时间，如果修改时间发生了变化，说明文件在缓存期间发生了变化，此时不应该返回缓存中的结果，而是应该重新读取文件。文件列表模式可以存储文件夹的修改时间。
+- **【严重问题】【存疑】** 在低速网络上传送稍大的二进制文件会被异常中断
 
 #### 注意事项
 
 不能让URI退到wwwroot之外，如`www.example.com/../`。对于这种请求，应该给一个拒绝访问的Response。
 
 #### HTTP压缩
-
-Deflate, Gzip:
-
-https://crates.io/crates/flate2
-
-brotli(br):
-
-https://crates.io/crates/brotli
 
 压缩已经实现，但brotli非常慢，因此默认启用gzip，无论浏览器是否支持brotli。

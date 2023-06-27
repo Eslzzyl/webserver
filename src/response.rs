@@ -143,8 +143,14 @@ impl Response {
                         }
                     }
                     contents = compress(contents, response.content_encoding).unwrap();
+
                     response.content_length = contents.len() as u64;
-                    response.content_type = Some(mime.to_string());
+                    debug!("[ID{}]Content-Length: {}", id, response.content_length);
+
+                    let content_type_str = mime.to_string();
+                    debug!("[ID{}]Content-Type: {}", id, &content_type_str);
+                    response.content_type = Some(content_type_str);
+                    
                     response.content = Some(Bytes::from(contents.clone()));
                     cache_lock.push(path, Bytes::from(contents));
                 }
@@ -424,6 +430,7 @@ impl Response {
                             return Self::response_404(request, id);
                         }
                     };
+                    debug!("[ID{}]文件扩展名: {}", id, extention.to_str().unwrap());
                     // 特殊情况：文件扩展名是PHP
                     if extention == "php" {
                         debug!("[ID{}]请求的文件是PHP，启用PHP处理", id);
@@ -442,6 +449,7 @@ impl Response {
                             .to_owned();
                     }
                     let mime = get_mime(extention);
+                    debug!("[ID{}]MIME类型: {}", id, mime);
                     Self::from_file(path, accept_encoding, id, cache, headonly, mime)
                         .set_date()
                         .set_code(200)
