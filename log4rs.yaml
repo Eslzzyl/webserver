@@ -4,6 +4,14 @@ refresh_rate: 30 seconds
 appenders:
     stdout:
         kind: console
+        encoder:
+            # log 信息模式，pattern指的是纯文本输出
+            # https://docs.rs/log4rs/latest/log4rs/encode/pattern/index.html
+            # d表示时间，下面这种时间设置可以产生类似2016-03-20 14:22:20的时间，时区为本地时区。
+            # t表示这条日志的target
+            # m表示日志信息
+            # n表示平台无关的换行
+            pattern: "{d(%Y-%m-%d %H:%M:%S)} {h([{l}])} {t} - {m}{n}"
     log_file:
         kind: rolling_file  # 循环写入配置文件
         policy:
@@ -16,12 +24,6 @@ appenders:
         path: "files/log/app.log"
         append: true # 追加模式, 即每次在已有文件末尾添加日志, 默认为 true
         encoder:
-            # log 信息模式，pattern指的是纯文本输出
-            # https://docs.rs/log4rs/0.10.0/log4rs/encode/pattern/index.html
-            # d表示时间，下面这种时间设置可以产生类似2016-03-20 14:22:20的时间，时区为本地时区。
-            # t表示这条日志的target
-            # m表示日志信息
-            # n表示平台无关的换行
             pattern: "{d(%Y-%m-%d %H:%M:%S)} {l} {t} - {m}{n}"
 # 对全局 log 进行配置
 root:
