@@ -20,7 +20,6 @@ use std::{
     fs::{self, File, metadata},
     ffi::OsStr,
     path::{Path, PathBuf},
-    os::unix::prelude::MetadataExt,
     str,
 };
 
@@ -124,7 +123,7 @@ impl Response {
                     let metadata = metadata(path).unwrap();
                     response.content_type = None;
                     response.content = None;
-                    response.content_length = metadata.size();
+                    response.content_length = metadata.len();
                 } else {
                     // 如果为false，又缓存不命中，就只好读取文件
                     let mut file = match File::open(path) {
